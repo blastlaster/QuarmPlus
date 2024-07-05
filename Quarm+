@@ -1,0 +1,181 @@
+import tkinter as tk
+from tkinter import messagebox, filedialog
+import requests
+import os
+import zipfile
+import shutil
+import glob
+import subprocess
+import json
+
+settings_file = "settings.json"
+
+def load_settings():
+    if os.path.exists(settings_file):
+        with open(settings_file, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_settings(settings):
+    with open(settings_file, 'w') as f:
+        json.dump(settings, f)
+
+def fetch_versions(github_repo):
+    api_url = f"https://api.github.com/repos/{github_repo}/releases"
+    response = requests.get(api_url)
+    if response.status_code == 200:
+        return [release['tag_name'] for release in response.json()]
+    return []
+
+def check_for_updates(github_repo, current_version, notice_label):
+    api_url = f"https://api.github.com/repos/{github_repo}/releases/latest"
+    response = requests.get(api_url)
+    if response.status_code == 200:
+        latest_version = response.json()['tag_name']
+        if latest_version != current_version:
+            notice_label.config(text=f"Latest Version: {latest_version}", fg="red")
+        else:
+            notice_label.config(text="", fg="black")
+    else:
+        notice_label.config(text="Failed to check for updates", fg="red")
+
+def check_and_update(project_name, version, github_repo, install_dir, log_widget):
+    try:
+        # Fetch the specified release from GitHub
+        api_url = f"https://api.github.com/repos/{github_repo}/releases/tags/{version}"
+        response = requests.get(api_url)
+        if response.status_code == 200:
+            download_url = response.json()['assets'][0]['browser_download_url']  # Assuming only one asset
+            download_path = os.path.join(install_dir, "temp.zip")
+            r = requests.get(download_url, stream=True)
+            with open(download_path, 'wb') as f:
+                shutil.copyfileobj(r.raw, f)
+
+            # Extract downloaded files
+            with zipfile.ZipFile(download_path, 'r') as zip_ref:
+                zip_ref.extractall(install_dir)
+
+            # Clean up temp files
+            os.remove(download_path)
+            log_widget.insert(tk.END, f"Updated {project_name} to version {version}\n")
+            return True
+        else:
+            log_widget.insert(tk.END, f"Failed to fetch release info for {project_name}\n")
+            return False
+    except Exception as e:
+        log_widget.insert(tk.END, f"Error updating {project_name}: {str(e)}\n")
+        return False
+
+def update_directories():
+    zeal_dir = zeal_dir_entry.get()
+    quarmtool_dir = quarmtool_dir_entry.get()
+    ui_dir_pattern = os.path.join(zeal_dir, "uifiles/*/")
+    updated_file_path = os.path.join(zeal_dir, "EQUI_OptionsWindow.xml")
+
+    log_widget.insert(tk.END, "Starting update process...\n")
+    zeal_version = zeal_version_var.get()
+    quarmtool_version = quarmtool_version_var.get()
+    zeal_updated = check_and_update("Zeal", zeal_version, "iamclint/Zeal", zeal_dir, log_widget)
+    quarmtool_updated = check_and_update("QuarmTool", quarmtool_version, "EJWellman/QuarmTool", quarmtool_dir, log_widget)
+
+    if os.path.exists(updated_file_path):
+        for subfolder_path in glob.glob(ui_dir_pattern):
+            if os.path.isdir(subfolder_path):
+                shutil.copy(updated_file_path, subfolder_path)
+                log_widget.insert(tk.END, f"Copied updated file to {subfolder_path}\n")
+    else:
+        for subfolder_path in glob.glob(ui_dir_pattern):
+            if os.path.isdir(subfolder_path):
+                shutil.copy("EQUI_OptionsWindow.xml", subfolder_path)
+                log_widget.insert(tk.END, f"Copied default file to {subfolder_path}\n")
+
+    if not zeal_updated and not quarmtool_updated:
+        log_widget.insert(tk.END, "All files are already up to date.\n")
+
+def browse_directory(entry_widget):
+    dir_path = filedialog.askdirectory()
+    if dir_path:
+        entry_widget.delete(0, tk.END)
+        entry_widget.insert(0, dir_path)
+        save_current_settings()
+
+def save_current_settings():
+    settings = {
+        "zeal_dir": zeal_dir_entry.get(),
+        "quarmtool_dir": quarmtool_dir_entry.get(),
+    }
+    save_settings(settings)
+
+# Create the main window
+root = tk.Tk()
+root.title("Quarm+ {Zeal/QT Patcher}")
+root.geometry("600x425")
+
+# Load the background image
+background_image = tk.PhotoImage(file="C:/Users/laser/Documents/patcher/background.png")  # Replace 'background.png' with the path to your background image
+background_label = tk.Label(root, image=background_image)
+background_label.place(relwidth=1, relheight=1)
+
+# Load saved settings
+settings = load_settings()
+
+# Create and place the directory input fields
+tk.Label(root, text="Zeal Directory:").pack()
+zeal_dir_frame = tk.Frame(root)
+zeal_dir_frame.pack()
+zeal_dir_entry = tk.Entry(zeal_dir_frame, width=50)
+zeal_dir_entry.pack(side=tk.LEFT)
+zeal_dir_button = tk.Button(zeal_dir_frame, text="Browse", command=lambda: browse_directory(zeal_dir_entry))
+zeal_dir_button.pack(side=tk.LEFT)
+zeal_notice = tk.Label(zeal_dir_frame, text="")
+zeal_notice.pack(side=tk.LEFT, padx=10)
+
+# Version selection dropdowns
+tk.Label(root, text="Select Zeal Version:").pack()
+zeal_version_var = tk.StringVar()
+zeal_version_dropdown = tk.OptionMenu(root, zeal_version_var, *fetch_versions("iamclint/Zeal"))
+zeal_version_dropdown.pack()
+
+if "zeal_dir" in settings:
+    zeal_dir_entry.insert(0, settings["zeal_dir"])
+
+tk.Label(root, text="QuarmTool Directory:").pack()
+quarmtool_dir_frame = tk.Frame(root)
+quarmtool_dir_frame.pack()
+quarmtool_dir_entry = tk.Entry(quarmtool_dir_frame, width=50)
+quarmtool_dir_entry.pack(side=tk.LEFT)
+quarmtool_dir_button = tk.Button(quarmtool_dir_frame, text="Browse", command=lambda: browse_directory(quarmtool_dir_entry))
+quarmtool_dir_button.pack(side=tk.LEFT)
+quarmtool_notice = tk.Label(quarmtool_dir_frame, text="")
+quarmtool_notice.pack(side=tk.LEFT, padx=10)
+
+# Version selection dropdowns
+tk.Label(root, text="Select QuarmTool Version:").pack()
+quarmtool_version_var = tk.StringVar()
+quarmtool_version_dropdown = tk.OptionMenu(root, quarmtool_version_var, *fetch_versions("EJWellman/QuarmTool"))
+quarmtool_version_dropdown.pack()
+
+if "quarmtool_dir" in settings:
+    quarmtool_dir_entry.insert(0, settings["quarmtool_dir"])
+
+# Create and place the Update and Launch buttons
+buttons_frame = tk.Frame(root)
+buttons_frame.pack(pady=10)
+
+update_button = tk.Button(buttons_frame, text="Update", command=update_directories)
+update_button.pack(side=tk.LEFT, padx=0)
+
+# Create and place the log display
+log_widget = tk.Text(root, width=70, height=10)
+log_widget.pack()
+
+# Save settings when directories are changed
+zeal_dir_entry.bind("<FocusOut>", lambda e: save_current_settings())
+quarmtool_dir_entry.bind("<FocusOut>", lambda e: save_current_settings())
+
+# Check for updates when the app starts
+check_for_updates("iamclint/Zeal", '5',  zeal_notice)
+check_for_updates("EJWellman/QuarmTool", '5', quarmtool_notice)
+
+# Run the main loop
+root.mainloop()
