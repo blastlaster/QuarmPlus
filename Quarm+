@@ -6,6 +6,7 @@ import zipfile
 import shutil
 import glob
 import json
+import configparser
 
 settings_file = "settings.json"
 
@@ -172,6 +173,66 @@ def update_quarmtool():
     if not quarmtool_updated:
         log_message("QuarmTool is already up to date.", "green")
 
+# Function to optimize settings
+def optimize_settings():
+    zeal_dir = zeal_dir_entry.get()
+    if not zeal_dir:
+        messagebox.showerror("Error", "In order to optimize settings, you must first select your Zeal directory. This should be your main TAKP/EQ folder.")
+        return
+    
+    eqclient_path = os.path.join(zeal_dir, 'eqclient.ini')
+    
+    if not os.path.exists(eqclient_path):
+        messagebox.showerror("Error", "eqclient.ini file not found in the selected directory.")
+        return
+    
+    config = configparser.ConfigParser()
+    config.optionxform = str
+    config.read(eqclient_path)
+    
+    # Settings to optimize
+    settings_to_optimize = {
+        'WindowedMode': 'FALSE',
+        'NewUI': 'TRUE',
+        'OldUI': 'FALSE',
+        'Log': 'TRUE',
+        'CombatMusic': 'TRUE',
+        'AttackOnAssist': 'FALSE',
+        'EnableExtendedNameplateDistance': 'TRUE',
+        'EnableBrownSkeletonHack': 'TRUE',
+        'BitsPerPixel': '32',
+        'RefreshRate': '60',
+        'User_70_Red': '0',
+        'User_70_Green': '133',
+        'User_70_Blue': '240',
+        'MaxFPS': '60',
+        'MaxBGFPS': '45',
+        'MaxMouseLookFPS': '60',
+        'NoFPSLimiter': '1',
+        'ChatTimestamps': '2',
+        'Bluecon': 'TRUE',
+        'ZealInput': 'TRUE',
+        'FloatingDamage': 'TRUE',
+        'HideLooted': 'FALSE',
+        'TargetRing': 'TRUE'
+    }
+
+    # Iterate through all sections and update settings if they exist
+    for section in config.sections():
+        for key, value in settings_to_optimize.items():
+            if config.has_option(section, key):
+                config.set(section, key, value)
+
+    # Update specific settings that require special handling
+    config['VideoMode']['Width'] = str(root.winfo_screenwidth())
+    config['VideoMode']['Height'] = str(root.winfo_screenheight())
+
+    # Write the changes back to the ini file
+    with open(eqclient_path, 'w') as configfile:
+        config.write(configfile)
+    
+    messagebox.showinfo("Optimization Complete", "Your settings have been optimized.")
+
 # Create the main window
 root = tk.Tk()
 root.title("Quarm+ {Zeal/QT Patcher}")
@@ -256,6 +317,10 @@ update_quarmtool_button.pack(side=tk.LEFT, padx=5)
 
 update_ui_button = tk.Button(buttons_frame, text="Update/Install Selected UI Files", command=install_ui_files)
 update_ui_button.pack(side=tk.LEFT, padx=5)
+
+# Create and place the "Optimize Settings" button
+optimize_button = tk.Button(root, text="Optimize Settings", command=optimize_settings)
+optimize_button.pack(pady=20)
 
 # Create and place the log display
 log_widget = tk.Text(root, width=70, height=10)
