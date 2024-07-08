@@ -199,7 +199,6 @@ def optimize_settings():
         'CombatMusic': 'TRUE',
         'AttackOnAssist': 'FALSE',
         'EnableExtendedNameplateDistance': 'TRUE',
-        'EnableBrownSkeletonHack': 'TRUE',
         'BitsPerPixel': '32',
         'RefreshRate': '60',
         'User_70_Red': '0',
