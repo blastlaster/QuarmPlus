@@ -1,14 +1,242 @@
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import ttk, colorchooser, messagebox, filedialog
 import requests
+import subprocess
 import os
 import zipfile
 import shutil
 import glob
 import json
 import configparser
+import traceback
 
 settings_file = "settings.json"
+
+import traceback
+
+class CustomDropdown(tk.Frame):
+    def __init__(self, master, variable, values, **kwargs):
+        super().__init__(master)
+        self.variable = variable
+        self.values = values
+
+        self.entry = tk.Entry(self, textvariable=self.variable, width=15, justify='center')
+        self.entry.pack(side='left', fill='x', expand=True)
+
+        self.button = tk.Button(self, text='▼', command=self.show_dropdown, width=3)
+        self.button.pack(side='left')
+
+        self.dropdown = tk.Menu(self, tearoff=0)
+        for value in self.values:
+            self.dropdown.add_command(label=value, command=lambda v=value: self.select_value(v))
+
+    def show_dropdown(self):
+        x = self.button.winfo_rootx()
+        y = self.button.winfo_rooty() + self.button.winfo_height()
+        self.dropdown.post(x, y)
+
+    def select_value(self, value):
+        self.variable.set(value)
+
+class AdvancedConfiguratorWindow(tk.Toplevel):
+    def __init__(self, parent, zeal_dir):
+        super().__init__(parent)
+        self.title("Advanced Configurator")
+        self.zeal_dir = zeal_dir
+        self.parent = parent
+        self.settings = {
+            'WindowedMode': 'bool',
+            'NewUI': 'bool',
+            'OldUI': 'bool',
+            'Log': 'bool',
+            'CombatMusic': 'bool',
+            'AttackOnAssist': 'bool',
+            'EnableBrownSkeletonHack': 'bool',
+            'EnableExtendedNameplateDistance': 'bool',
+            'BitsPerPixel': 'int',
+            'Width': 'int',
+            'Height': 'int',
+            'RefreshRate': 'int',
+            'MaxFPS': 'int',
+            'MaxBGFPS': 'int',
+            'MaxMouseLookFPS': 'int',
+            'NoFPSLimiter': 'int',
+            'ChatTimestamps': 'dropdown',
+            'Bluecon': 'bool',
+            'ZealInput': 'bool',
+            'FloatingDamage': 'bool',
+            'HideLooted': 'bool',
+            'TargetRing': 'bool'
+        }
+        self.chat_timestamp_options = {
+            'None': 1,
+            'Short': 2,
+            'Long': 3
+        }
+        try:
+            self.current_settings = self.load_current_settings()
+            print("Current settings loaded successfully")
+        except Exception as e:
+            print(f"Error loading current settings: {str(e)}")
+            print(traceback.format_exc())
+        
+        try:
+            self.create_widgets()
+            print("Widgets created successfully")
+        except Exception as e:
+            print(f"Error creating widgets: {str(e)}")
+            print(traceback.format_exc())
+        
+        self.bind_mousewheel_to_canvas()
+        self.update_idletasks()
+        self.geometry(f"{self.winfo_reqwidth()}x{self.winfo_reqheight()}+{parent.winfo_x()+parent.winfo_width()+10}+{parent.winfo_y()}")
+        self.transient(parent)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def load_current_settings(self):
+        eqclient_path = os.path.join(self.zeal_dir, 'eqclient.ini')
+        config = configparser.ConfigParser()
+        config.optionxform = str
+        config.read(eqclient_path)
+        settings = {}
+        for section in config.sections():
+            for key in self.settings:
+                if config.has_option(section, key):
+                    value = config.get(section, key)
+                    if self.settings[key] == 'bool':
+                        settings[key] = value.lower() == 'true'
+                    elif self.settings[key] == 'int':
+                        settings[key] = int(value) if value.isdigit() else 0
+        if 'Bluecon' in settings and settings['Bluecon']:
+            for color in ['Red', 'Green', 'Blue']:
+                key = f'User_70_{color}'
+                if config.has_option(section, key):
+                    settings[key] = int(config.get(section, key))
+        return settings
+
+    def create_widgets(self):
+        main_frame = tk.Frame(self)
+        main_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+        self.canvas = tk.Canvas(main_frame)
+        scrollbar = tk.Scrollbar(main_frame, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = tk.Frame(self.canvas)
+
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(
+                scrollregion=self.canvas.bbox("all")
+            )
+        )
+
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+
+        self.widgets = {}
+        for setting, type_ in self.settings.items():
+            frame = tk.Frame(self.scrollable_frame)
+            frame.pack(fill=tk.X, padx=5, pady=5)
+            
+            label = tk.Label(frame, text=f"{setting}:")
+            label.pack(side=tk.LEFT)
+
+            if type_ == 'bool':
+                var = tk.BooleanVar(value=self.current_settings.get(setting, False))
+                widget = tk.Checkbutton(frame, variable=var)
+            elif type_ == 'dropdown' and setting == 'ChatTimestamps':
+                var = tk.StringVar(value=self.get_chat_timestamp_key(self.current_settings.get(setting, 1)))
+                widget = CustomDropdown(frame, var, list(self.chat_timestamp_options.keys()))
+                widget.config(width=200, height=30)
+            else:
+                var = tk.StringVar(value=str(self.current_settings.get(setting, '')))
+                widget = tk.Entry(frame, textvariable=var, width=10)
+
+            widget.pack(side=tk.RIGHT, padx=(0, 10))
+            self.widgets[setting] = var
+
+            if setting == 'Bluecon':
+                self.bluecon_var = var
+                self.bluecon_var.trace('w', self.toggle_color_picker)
+                self.color_button = tk.Button(frame, text="Choose Color", command=self.choose_color)
+                self.color_button.pack(side=tk.RIGHT, padx=(0, 10))
+                self.toggle_color_picker()
+
+        apply_button = tk.Button(self.scrollable_frame, text="Apply Settings", command=self.apply_settings)
+        apply_button.pack(pady=10)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+    # ... (rest of the methods remain the same)
+
+    def bind_mousewheel_to_canvas(self):
+        def _on_mousewheel(event):
+            self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+        self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+    def toggle_color_picker(self, *args):
+        if self.bluecon_var.get():
+            self.color_button.pack(side=tk.RIGHT, padx=(0, 10))
+        else:
+            self.color_button.pack_forget()
+
+    def choose_color(self):
+        self.attributes('-topmost', True)  # Keep window on top
+        color = colorchooser.askcolor(title="Choose color", parent=self)
+        self.attributes('-topmost', False)  # Remove topmost attribute
+        if color[1]:
+            r, g, b = [int(x) for x in color[0]]
+            self.widgets['User_70_Red'] = tk.IntVar(value=r)
+            self.widgets['User_70_Green'] = tk.IntVar(value=g)
+            self.widgets['User_70_Blue'] = tk.IntVar(value=b)
+            self.color_button.config(bg=color[1])
+
+    def get_chat_timestamp_key(self, value):
+        return next((k for k, v in self.chat_timestamp_options.items() if v == value), 'None')
+
+    def apply_settings(self):
+        eqclient_path = os.path.join(self.zeal_dir, 'eqclient.ini')
+        if not os.path.exists(eqclient_path):
+            messagebox.showerror("Error", "eqclient.ini file not found in the selected directory.")
+            return
+
+        config = configparser.ConfigParser()
+        config.optionxform = str
+        config.read(eqclient_path)
+
+        for section in config.sections():
+            for setting, var in self.widgets.items():
+                if config.has_option(section, setting):
+                    value = var.get()
+                    if isinstance(value, bool):
+                        value = 'TRUE' if value else 'FALSE'
+                    elif setting == 'ChatTimestamps':
+                        value = str(self.chat_timestamp_options[value])
+                    config.set(section, setting, str(value))
+
+        with open(eqclient_path, 'w') as configfile:
+            config.write(configfile)
+
+        messagebox.showinfo("Settings Applied", "Your settings have been applied successfully.")
+        self.on_closing()
+
+    def on_closing(self):
+        self.parent.focus_set()  # Give focus back to the parent window
+        self.destroy()  # Close the configurator window
+
+def open_advanced_configurator():
+    if not zeal_dir_entry.get():
+        messagebox.showerror("Error", "Please select your Zeal directory first.")
+        return
+    try:
+        configurator = AdvancedConfiguratorWindow(root, zeal_dir_entry.get())
+        print("Advanced Configurator window opened successfully")
+    except Exception as e:
+        print(f"Error opening Advanced Configurator: {str(e)}")
+        print(traceback.format_exc())
+        messagebox.showerror("Error", f"Failed to open Advanced Configurator: {str(e)}")
 
 def load_settings():
     if os.path.exists(settings_file):
@@ -173,6 +401,39 @@ def update_quarmtool():
     if not quarmtool_updated:
         log_message("QuarmTool is already up to date.", "green")
 
+def run_quarmtool():
+    quarmtool_dir = quarmtool_dir_entry.get()
+    if not quarmtool_dir:
+        messagebox.showerror("Error", "QuarmTool directory is not set. Please set the directory before running QuarmTool.")
+        return
+    
+    quarmtool_path = os.path.join(quarmtool_dir, "QuarmTool.exe")
+    if not os.path.exists(quarmtool_path):
+        messagebox.showerror("Error", "QuarmTool.exe not found in the specified directory.")
+        return
+    
+    try:
+        subprocess.Popen(quarmtool_path, cwd=quarmtool_dir)
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to run QuarmTool: {str(e)}")
+
+def run_project_quarm():
+    zeal_dir = zeal_dir_entry.get()
+    if not zeal_dir:
+        messagebox.showerror("Error", "Zeal directory is not set. Please set the directory before running Project Quarm.")
+        return
+    
+    eqgame_path = os.path.join(zeal_dir, "eqgame.exe")
+    if not os.path.exists(eqgame_path):
+        messagebox.showerror("Error", "eqgame.exe not found in the specified Zeal directory.")
+        return
+    
+    try:
+        os.chdir(zeal_dir)
+        subprocess.Popen(eqgame_path)
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to run Project Quarm: {str(e)}")
+
 # Function to optimize settings
 def optimize_settings():
     zeal_dir = zeal_dir_entry.get()
@@ -235,7 +496,7 @@ def optimize_settings():
 # Create the main window
 root = tk.Tk()
 root.title("Quarm+ {Zeal/QT Patcher}")
-root.geometry("600x600")
+root.geometry("600x625")
 
 # Load saved settings
 settings = load_settings()
@@ -317,14 +578,46 @@ update_quarmtool_button.pack(side=tk.LEFT, padx=5)
 update_ui_button = tk.Button(buttons_frame, text="Update/Install Selected UI Files", command=install_ui_files)
 update_ui_button.pack(side=tk.LEFT, padx=5)
 
-# Create and place the "Optimize Settings" button
-optimize_button = tk.Button(root, text="Optimize Settings", command=optimize_settings)
-optimize_button.pack(pady=20)
+# Buttons for "Optimize Settings" and "Advanced Configurator"
+tk.Label(root, text="Settings:", font=header_font).pack()
 
-# Create and place the log display
-log_widget = tk.Text(root, width=70, height=10)
-log_widget.pack()
+buttons_frame = tk.Frame(root)
+buttons_frame.pack(pady=10)
 
+optimize_button = tk.Button(buttons_frame, text="Apply Suggested Settings", command=optimize_settings)
+optimize_button.pack(side=tk.LEFT, padx=5)
+
+advanced_config_button = tk.Button(buttons_frame, text="Advanced Configurator", command=open_advanced_configurator)
+advanced_config_button.pack(side=tk.LEFT, padx=5)
+
+# Buttons for "Play" section
+tk.Label(root, text="Play:", font=header_font).pack()
+
+play_buttons_frame = tk.Frame(root)
+play_buttons_frame.pack(pady=10)
+
+run_quarmtool_button = tk.Button(play_buttons_frame, text="Run QuarmTool", command=run_quarmtool)
+run_quarmtool_button.pack(side=tk.LEFT, padx=5)
+
+run_project_quarm_button = tk.Button(play_buttons_frame, text="Run Project Quarm", command=run_project_quarm)
+run_project_quarm_button.pack(side=tk.LEFT, padx=5)
+
+# Create a frame to hold the log widget and scrollbar
+log_frame = tk.Frame(root)
+log_frame.pack(fill=tk.BOTH, expand=True)
+
+# Create the log widget (Text) and scrollbar
+log_widget = tk.Text(log_frame, width=70, height=10, wrap=tk.WORD)
+log_scrollbar = tk.Scrollbar(log_frame, orient="vertical", command=log_widget.yview)
+
+# Configure the log widget to use the scrollbar
+log_widget.configure(yscrollcommand=log_scrollbar.set)
+
+# Pack the log widget and scrollbar
+log_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+# Configure tags for colored text (if you're using them)
 log_widget.tag_configure("red", foreground="red")
 log_widget.tag_configure("green", foreground="green")
 log_widget.tag_configure("black", foreground="black")
