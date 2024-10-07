@@ -4,6 +4,8 @@ import requests
 import subprocess
 import os
 import zipfile
+import py7zr
+import rarfile
 import shutil
 import glob
 import json
@@ -277,7 +279,6 @@ def log_message(message, color):
     else:
         log_widget.insert(tk.END, message + "\n")
 
-
 def check_and_update(project_name, version, github_repo, install_dir, log_widget):
     try:
         api_url = f"https://api.github.com/repos/{github_repo}/releases/tags/{version}"
@@ -327,33 +328,51 @@ def install_ui_files():
     ui_files = [
         {"name": "Nillipuss UI 1080p", "url": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest", "var": nillipuss_1080p_var},
         {"name": "Nillipuss UI 1440p", "url": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest", "var": nillipuss_1440p_var},
-        {"name": "QRustle", "url": "https://api.github.com/repos/UnforgivunAL/QRustle/releases/latest", "var": qrustle_var}
+        {"name": "QRustle", "url": "https://api.github.com/repos/UnforgivunAL/QRustle/releases/latest", "var": qrustle_var},
+        {"name": "DuxaUI", "url": "https://github.com/LordDemonos/Quarm.Guide/blob/master/assets/duxaUI.7z?raw=true", "var": duxaui_var},
+        {"name": "qqui (Calmethar Edition)", "url": "https://www.eqinterface.com/downloads/download.php?id=6959", "var": qqui_var}
     ]
 
     for ui_file in ui_files:
         if ui_file["var"].get():  # Check if the UI file checkbox is selected
             try:
-                response = requests.get(ui_file["url"])
-                if response.status_code == 200:
+                if ui_file["name"] == "qqui (Calmethar Edition)":
+                    download_url = ui_file["url"]
+                    file_extension = ".rar"
+                elif ui_file["name"] == "DuxaUI":
+                    download_url = ui_file["url"]
+                    file_extension = ".7z"
+                else:
+                    response = requests.get(ui_file["url"])
+                    if response.status_code != 200:
+                        log_message(f"Failed to fetch release info for {ui_file['name']}", "red")
+                        continue
                     download_url = response.json()['assets'][0]['browser_download_url']
-                    download_path = os.path.join(zeal_dir, "uifiles")
-                    os.makedirs(download_path, exist_ok=True)
-                    download_path = os.path.join(download_path, f"{ui_file['name']}.zip")
+                    file_extension = ".zip"
 
-                    r = requests.get(download_url, stream=True)
-                    with open(download_path, 'wb') as f:
-                        shutil.copyfileobj(r.raw, f)
+                download_path = os.path.join(zeal_dir, "uifiles")
+                os.makedirs(download_path, exist_ok=True)
+                download_path = os.path.join(download_path, f"{ui_file['name']}{file_extension}")
 
-                    # Extract downloaded files directly into /uifiles/ directory
+                r = requests.get(download_url, stream=True)
+                with open(download_path, 'wb') as f:
+                    shutil.copyfileobj(r.raw, f)
+
+                # Extract downloaded files directly into /uifiles/ directory
+                if file_extension == ".7z":
+                    with py7zr.SevenZipFile(download_path, mode='r') as z:
+                        z.extractall(os.path.join(zeal_dir, "uifiles"))
+                elif file_extension == ".rar":
+                    with rarfile.RarFile(download_path, 'r') as rf:
+                        rf.extractall(os.path.join(zeal_dir, "uifiles/qqui"))
+                else:
                     with zipfile.ZipFile(download_path, 'r') as zip_ref:
                         zip_ref.extractall(os.path.join(zeal_dir, "uifiles"))
 
-                    # Clean up temp files
-                    os.remove(download_path)
-                    ui_files_to_install.append(ui_file['name'])
-                    log_message(f"Installed {ui_file['name']} UI files to {zeal_dir}/uifiles", "green")
-                else:
-                    log_message(f"Failed to download {ui_file['name']} UI files", "red")
+                # Clean up temp files
+                os.remove(download_path)
+                ui_files_to_install.append(ui_file['name'])
+                log_message(f"Installed {ui_file['name']} UI files to {zeal_dir}/uifiles", "green")
             except Exception as e:
                 log_message(f"Error installing {ui_file['name']} UI files: {str(e)}", "red")
 
@@ -364,7 +383,6 @@ def install_ui_files():
 
 def update_zeal():
     zeal_dir = zeal_dir_entry.get()
-    ui_dir_pattern = os.path.join(zeal_dir, "uifiles/*/")
     updated_file_path = os.path.join(zeal_dir, "EQUI_OptionsWindow.xml")
 
     log_message("Starting update process for Zeal...", "black")
@@ -372,15 +390,10 @@ def update_zeal():
     zeal_updated = check_and_update("Zeal", zeal_version, "iamclint/Zeal", zeal_dir, log_widget)
 
     if os.path.exists(updated_file_path):
-        for subfolder_path in glob.glob(ui_dir_pattern):
-            if os.path.isdir(subfolder_path):
-                shutil.copy(updated_file_path, subfolder_path)
-                log_message(f"Copied updated file to {subfolder_path}", "green")
+        log_message(f"Updated file found at {updated_file_path}", "green")
     else:
-        for subfolder_path in glob.glob(ui_dir_pattern):
-            if os.path.isdir(subfolder_path):
-                shutil.copy("EQUI_OptionsWindow.xml", subfolder_path)
-                log_message(f"Copied default file to {subfolder_path}", "green")
+        shutil.copy("EQUI_OptionsWindow.xml", zeal_dir)
+        log_message(f"Copied default file to {zeal_dir}", "green")
 
     if not zeal_updated:
         log_message("Zeal is already up to date.", "green")
@@ -434,7 +447,6 @@ def run_project_quarm():
     except Exception as e:
         messagebox.showerror("Error", f"Failed to run Project Quarm: {str(e)}")
 
-# Function to optimize settings
 def optimize_settings():
     zeal_dir = zeal_dir_entry.get()
     if not zeal_dir:
@@ -496,7 +508,7 @@ def optimize_settings():
 # Create the main window
 root = tk.Tk()
 root.title("Quarm+ {Zeal/QT Patcher}")
-root.geometry("600x625")
+root.geometry("600x700")
 
 # Load saved settings
 settings = load_settings()
@@ -565,6 +577,14 @@ qrustle_var = tk.BooleanVar()
 qrustle_var.set(False)
 tk.Checkbutton(ui_checkboxes_frame, text="QRustle", variable=qrustle_var).pack(anchor=tk.W)
 
+duxaui_var = tk.BooleanVar()
+duxaui_var.set(False)
+tk.Checkbutton(ui_checkboxes_frame, text="DuxaUI", variable=duxaui_var).pack(anchor=tk.W)
+
+qqui_var = tk.BooleanVar()
+qqui_var.set(False)
+tk.Checkbutton(ui_checkboxes_frame, text="qqui (Calmethar Edition) [WinRar/Unrar Required]", variable=qqui_var).pack(anchor=tk.W)
+
 # Create and place the Update and Launch buttons
 buttons_frame = tk.Frame(root)
 buttons_frame.pack(pady=10)
@@ -575,7 +595,7 @@ update_zeal_button.pack(side=tk.LEFT, padx=5)
 update_quarmtool_button = tk.Button(buttons_frame, text="Update/Install QuarmTool", command=update_quarmtool)
 update_quarmtool_button.pack(side=tk.LEFT, padx=5)
 
-update_ui_button = tk.Button(buttons_frame, text="Update/Install Selected UI Files", command=install_ui_files)
+update_ui_button = tk.Button(buttons_frame, text="Install Selected UI Files", command=install_ui_files)
 update_ui_button.pack(side=tk.LEFT, padx=5)
 
 # Buttons for "Optimize Settings" and "Advanced Configurator"
