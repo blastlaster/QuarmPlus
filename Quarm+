@@ -381,21 +381,13 @@ def install_ui_files():
     else:
         messagebox.showinfo("Information", "No UI files were installed.")
 
-def update_zeal():
-    zeal_dir = zeal_dir_entry.get()
-    updated_file_path = os.path.join(zeal_dir, "EQUI_OptionsWindow.xml")
 
-    log_message("Starting update process for Zeal...", "black")
-    zeal_version = zeal_version_var.get()
-    zeal_updated = check_and_update("Zeal", zeal_version, "iamclint/Zeal", zeal_dir, log_widget)
-
-    if os.path.exists(updated_file_path):
-        log_message(f"Updated file found at {updated_file_path}", "green")
-    else:
-        shutil.copy("EQUI_OptionsWindow.xml", zeal_dir)
-        log_message(f"Copied default file to {zeal_dir}", "green")
-
-    if not zeal_updated:
+def update_zeal(): 
+    zeal_dir = zeal_dir_entry.get() 
+    log_message("Starting update process for Zeal...", "black") 
+    zeal_version = zeal_version_var.get() 
+    zeal_updated = check_and_update("Zeal", zeal_version, "iamclint/Zeal", zeal_dir, log_widget) 
+    if not zeal_updated: 
         log_message("Zeal is already up to date.", "green")
 
 def update_quarmtool():
