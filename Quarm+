@@ -8,6 +8,8 @@ import rarfile
 import json
 import configparser
 import traceback
+import time
+import logging
 import tkinter as tk
 from tkinter import ttk, colorchooser, messagebox, filedialog
 
@@ -227,6 +229,30 @@ class AdvancedConfiguratorWindow(tk.Toplevel):
         self.parent.focus_set()  # Give focus back to the parent window
         self.destroy()  # Close the configurator window
 
+class UIInstallationStatus(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("UI Installation Status")
+        self.geometry("300x200")
+        self.transient(parent)
+        self.grab_set()
+
+        self.status_text = tk.Text(self, wrap=tk.WORD, width=40, height=10)
+        self.status_text.pack(padx=10, pady=10, expand=True, fill=tk.BOTH)
+
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(self, variable=self.progress_var, maximum=100)
+        self.progress_bar.pack(padx=10, pady=10, fill=tk.X)
+
+    def update_status(self, message):
+        self.status_text.insert(tk.END, message + "\n")
+        self.status_text.see(tk.END)
+        self.update()
+
+    def update_progress(self, value):
+        self.progress_var.set(value)
+        self.update()
+
 def open_advanced_configurator():
     if not zeal_dir_entry.get():
         messagebox.showerror("Error", "Please select your Zeal directory first.")
@@ -269,6 +295,7 @@ def check_for_updates(github_repo, current_version, notice_label):
         notice_label.config(text="Failed to check for updates", fg="red")
 
 def log_message(message, color):
+    log_widget.config(state=tk.NORMAL)
     if color == "red":
         log_widget.tag_configure("red", foreground="red")
         log_widget.insert(tk.END, message + "\n", "red")
@@ -277,6 +304,9 @@ def log_message(message, color):
         log_widget.insert(tk.END, message + "\n", "green")
     else:
         log_widget.insert(tk.END, message + "\n")
+    log_widget.config(state=tk.DISABLED)
+    log_widget.see(tk.END)  # Automatically scroll to the bottom
+    log_widget.update()  # Force update to show new content immediately
 
 def check_and_update(project_name, version, github_repo, install_dir, log_widget):
     try:
@@ -316,6 +346,44 @@ def save_current_settings():
     }
     save_settings(settings)
 
+def download_with_retry(url, path, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            log_message(f"Downloading from {url} (Attempt {attempt + 1}/{max_retries})", "black")
+            response = requests.get(url, stream=True)
+            response.raise_for_status()
+            
+            total_size = int(response.headers.get('content-length', 0))
+            block_size = 8192
+            downloaded_size = 0
+            
+            with open(path, 'wb') as file:
+                for chunk in response.iter_content(chunk_size=block_size):
+                    if chunk:
+                        file.write(chunk)
+                        downloaded_size += len(chunk)
+                        
+                        # Calculate and log progress
+                        if total_size > 0:
+                            progress = (downloaded_size / total_size) * 100
+                            log_message(f"Download progress: {progress:.2f}%", "black")
+            
+            log_message(f"Successfully downloaded to {path}", "green")
+            return True
+        
+        except requests.exceptions.RequestException as e:
+            log_message(f"Download attempt {attempt + 1} failed: {str(e)}", "red")
+            if attempt == max_retries - 1:
+                log_message(f"Max retries reached. Download failed.", "red")
+                return False
+            
+            # Exponential backoff
+            wait_time = 2 ** attempt
+            log_message(f"Retrying in {wait_time} seconds...", "black")
+            time.sleep(wait_time)
+    
+    return False
+
 def install_ui_files():
     zeal_dir = zeal_dir_entry.get()
     ui_files_to_install = []
@@ -323,6 +391,8 @@ def install_ui_files():
     if zeal_dir == "":
         messagebox.showerror("Error", "Please enter an EQ directory to install UI Files.")
         return
+
+    status_window = UIInstallationStatus(root)
 
     ui_files = [
         {"name": "Nillipuss UI 1080p", "url": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest", "var": nillipuss_1080p_var},
@@ -332,26 +402,50 @@ def install_ui_files():
         {"name": "qqui (Calmethar Edition)", "url": "https://www.eqinterface.com/downloads/download.php?id=6959", "var": qqui_var}
     ]
 
-def install_ui_files():
-    zeal_dir = zeal_dir_entry.get()
-    ui_files_to_install = []
-    
-    if zeal_dir == "":
-        messagebox.showerror("Error", "Please enter an EQ directory to install UI Files.")
-        return
-
-    ui_files = [
-        {"name": "Nillipuss UI 1080p", "url": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest", "var": nillipuss_1080p_var},
-        {"name": "Nillipuss UI 1440p", "url": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest", "var": nillipuss_1440p_var},
-        {"name": "QRustle", "url": "https://api.github.com/repos/UnforgivunAL/QRustle/releases/latest", "var": qrustle_var},
-        {"name": "DuxaUI", "url": "https://github.com/LordDemonos/Quarm.Guide/blob/master/assets/duxaUI.7z?raw=true", "var": duxaui_var},
-        {"name": "qqui (Calmethar Edition)", "url": "https://www.eqinterface.com/downloads/download.php?id=6959", "var": qqui_var}
-    ]
+    total_files = sum(1 for ui_file in ui_files if ui_file["var"].get())
+    files_processed = 0
 
     for ui_file in ui_files:
         if ui_file["var"].get():  # Check if the UI file checkbox is selected
             try:
-                # ... (rest of the UI file installation code remains the same)
+                status_window.update_status(f"Processing {ui_file['name']}...")
+
+                if ui_file["name"] == "qqui (Calmethar Edition)":
+                    download_url = ui_file["url"]
+                    file_extension = ".rar"
+                elif ui_file["name"] == "DuxaUI":
+                    download_url = ui_file["url"]
+                    file_extension = ".7z"
+                else:
+                    response = requests.get(ui_file["url"])
+                    if response.status_code != 200:
+                        log_message(f"Failed to fetch release info for {ui_file['name']}", "red")
+                        continue
+                    download_url = response.json()['assets'][0]['browser_download_url']
+                    file_extension = ".zip"
+
+                download_path = os.path.join(zeal_dir, "uifiles")
+                os.makedirs(download_path, exist_ok=True)
+                download_path = os.path.join(download_path, f"{ui_file['name']}{file_extension}")
+
+                r = requests.get(download_url, stream=True)
+                with open(download_path, 'wb') as f:
+                    shutil.copyfileobj(r.raw, f)
+
+                # Extract downloaded files directly into /uifiles/ directory
+                if file_extension == ".7z":
+                    with py7zr.SevenZipFile(download_path, mode='r') as z:
+                        z.extractall(os.path.join(zeal_dir, "uifiles"))
+                elif file_extension == ".rar":
+                    with rarfile.RarFile(download_path, 'r') as rf:
+                        rf.extractall(os.path.join(zeal_dir, "uifiles/qqui"))
+                else:
+                    with zipfile.ZipFile(download_path, 'r') as zip_ref:
+                        zip_ref.extractall(os.path.join(zeal_dir, "uifiles"))
+
+                # Clean up temp files
+                os.remove(download_path)
+                ui_files_to_install.append(ui_file['name'])
                 ui_files_to_install.append(ui_file['name'])
                 log_message(f"Installed {ui_file['name']} UI files to {zeal_dir}/uifiles", "green")
             except Exception as e:
@@ -364,6 +458,23 @@ def install_ui_files():
         messagebox.showinfo("Success", f"Installed UI files: {', '.join(ui_files_to_install)}")
     else:
         messagebox.showinfo("Information", "No UI files were installed.")
+                
+        status_window.update_status(f"Installed {ui_file['name']} UI files.")
+        ui_files_to_install.append(ui_file['name'])
+                
+    try:
+        files_processed += 1
+        status_window.update_progress((files_processed / total_files) * 100)
+    except Exception as e:
+        status_window.update_status(f"Error installing {ui_file['name']} UI files: {str(e)}")
+        log_message(f"Error installing {ui_file['name']} UI files: {str(e)}", "red")
+
+    delete_equi_options_window(zeal_dir)
+
+    status_window.update_status("Installation complete.")
+    status_window.update_progress(100)
+
+    status_window.destroy()
 
 def delete_uifiles_zeal(zeal_dir):
     uifiles_zeal_path = os.path.join(zeal_dir, 'uifiles', 'zeal')
@@ -409,7 +520,7 @@ def update_zeal():
     zeal_updated = check_and_update("Zeal", zeal_version, "iamclint/Zeal", zeal_dir, log_widget)
     if not zeal_updated:
         log_message("Zeal is already up to date.", "green")
-        
+
     # Call the function to delete EQUI_OptionsWindow.html after updating Zeal
     delete_equi_options_window(zeal_dir)
 
