@@ -11,6 +11,7 @@ import traceback
 import time
 import logging
 import tkinter as tk
+import webbrowser
 from tkinter import ttk, colorchooser, messagebox, filedialog
 
 settings_file = "settings.json"
@@ -63,7 +64,7 @@ class AdvancedConfiguratorWindow(tk.Toplevel):
             'MaxFPS': 'int',
             'MaxBGFPS': 'int',
             'MaxMouseLookFPS': 'int',
-            'NoFPSLimiter': 'int',
+            'NoFPSLimiter': 'bool',
             'ChatTimestamps': 'dropdown',
             'Bluecon': 'bool',
             'ZealInput': 'bool',
@@ -75,7 +76,12 @@ class AdvancedConfiguratorWindow(tk.Toplevel):
             'None': 1,
             'Short': 2,
             'Long': 3
-        }
+            }
+        self.nofpslimiter_options = {
+            'On (recommended)': 1,
+            'Off': 0,
+            }
+
         try:
             self.current_settings = self.load_current_settings()
             print("Current settings loaded successfully")
@@ -150,7 +156,11 @@ class AdvancedConfiguratorWindow(tk.Toplevel):
             elif type_ == 'dropdown' and setting == 'ChatTimestamps':
                 var = tk.StringVar(value=self.get_chat_timestamp_key(self.current_settings.get(setting, 1)))
                 widget = CustomDropdown(frame, var, list(self.chat_timestamp_options.keys()))
-                widget.config(width=200, height=30)
+                widget.config(width=150, height=30)
+            elif type_ == 'dropdown' and setting == 'NoFPSLimiter':
+                var = tk.StringVar(value=self.get_chat_timestamp_key(self.current_settings.get(setting, 1)))
+                widget = CustomDropdown(frame, var, list(self.nofpslimiter_options.keys()))
+                widget.config(width=150, height=20)
             else:
                 var = tk.StringVar(value=str(self.current_settings.get(setting, '')))
                 widget = tk.Entry(frame, textvariable=var, width=10)
@@ -219,15 +229,22 @@ class AdvancedConfiguratorWindow(tk.Toplevel):
                         value = str(self.chat_timestamp_options[value])
                     config.set(section, setting, str(value))
 
+        # Handle NoFPSLimiter specifically
+        if 'Options' not in config.sections():
+            config.add_section('Options')
+        no_fps_limiter_value = '1' if self.widgets['NoFPSLimiter'].get() else '0'
+        config.set('Options', 'NoFPSlimiter', no_fps_limiter_value)
+
         with open(eqclient_path, 'w') as configfile:
             config.write(configfile)
 
         messagebox.showinfo("Settings Applied", "Your settings have been applied successfully.")
-        self.on_closing()
+        self.destroy()  # Close the window after applying settings
 
     def on_closing(self):
         self.parent.focus_set()  # Give focus back to the parent window
         self.destroy()  # Close the configurator window
+
 
 class UIInstallationStatus(tk.Toplevel):
     def __init__(self, parent):
@@ -268,8 +285,11 @@ def open_advanced_configurator():
 def load_settings():
     if os.path.exists(settings_file):
         with open(settings_file, 'r') as f:
-            return json.load(f)
-    return {}
+            settings = json.load(f)
+            if "show_welcome" not in settings:
+                settings["show_welcome"] = True
+            return settings
+    return {"show_welcome": True}
 
 def save_settings(settings):
     with open(settings_file, 'w') as f:
@@ -476,6 +496,12 @@ def install_ui_files():
 
     status_window.destroy()
 
+def toggle_panel():
+    if panel_frame.winfo_ismapped():
+        panel_frame.pack_forget()  # Hide the panel if it's visible
+    else:
+        panel_frame.pack(fill=tk.X, pady=10)  # Show the panel if it's hidden
+
 def delete_uifiles_zeal(zeal_dir):
     uifiles_zeal_path = os.path.join(zeal_dir, 'uifiles', 'zeal')
     if os.path.exists(uifiles_zeal_path):
@@ -539,6 +565,18 @@ def update_quarmtool():
 
     if not quarmtool_updated:
         log_message("QuarmTool is already up to date.", "green")
+
+# New function to update all
+def update_all():
+    update_zeal()
+    update_quarmtool()
+    print("Zeal and QT have been updated.")
+
+# New function to launch all
+def launch_all():
+    run_quarmtool()
+    run_project_quarm()
+    print("You're in our world now.")
 
 def run_quarmtool():
     quarmtool_dir = quarmtool_dir_entry.get()
@@ -606,7 +644,6 @@ def optimize_settings():
         'MaxFPS': '60',
         'MaxBGFPS': '45',
         'MaxMouseLookFPS': '60',
-        'NoFPSLimiter': '1',
         'ChatTimestamps': '2',
         'Bluecon': 'TRUE',
         'ZealInput': 'TRUE',
@@ -614,17 +651,22 @@ def optimize_settings():
         'HideLooted': 'FALSE',
         'TargetRing': 'TRUE'
     }
-
+    
     # Iterate through all sections and update settings if they exist
     for section in config.sections():
         for key, value in settings_to_optimize.items():
             if config.has_option(section, key):
                 config.set(section, key, value)
-
+    
     # Update specific settings that require special handling
     config['VideoMode']['Width'] = str(root.winfo_screenwidth())
     config['VideoMode']['Height'] = str(root.winfo_screenheight())
-
+    
+    # Ensure NoFPSLimiter=1 is in the [Options] section
+    if 'Options' not in config:
+        config['Options'] = {}
+    config['Options']['NoFPSLimiter'] = '1'
+    
     # Write the changes back to the ini file
     with open(eqclient_path, 'w') as configfile:
         config.write(configfile)
@@ -632,12 +674,27 @@ def optimize_settings():
     messagebox.showinfo("Optimization Complete", "Your settings have been optimized.")
 
 # Create the main window
-root = tk.Tk()
-root.title("Quarm+ {Zeal/QT Patcher}")
-root.geometry("600x700")
+if __name__ == "__main__":
+    root = tk.Tk()
+    root.title("Quarm+ v8.2")
+    root.geometry("500x900")
 
-# Load saved settings
-settings = load_settings()
+    # Load saved settings
+    settings = load_settings()
+
+# Create a frame to hold the buttons
+button_frame = tk.Frame(root)
+button_frame.pack(padx=5, pady=5)
+
+pastel_yellow = "#FFFFD1"  # You can adjust this hex color code for different shades of pastel yellow
+
+tk.Button(button_frame, 
+          text="Guide - Install Project Quarm", 
+          command=lambda: webbrowser.open("https://quarm.guide/installing-the-game"),
+          bg=pastel_yellow).pack(side=tk.LEFT, padx=5, pady=5)
+
+separator = tk.Frame(root, height=2, bd=1, relief=tk.SUNKEN, bg="lightgray")
+separator.pack(fill=tk.X, padx=10, pady=10)
 
 # Create and place the directory input fields
 header_font = ('Helvetica', 12)
@@ -664,6 +721,8 @@ zeal_version_dropdown.pack()
 if "zeal_dir" in settings:
     zeal_dir_entry.insert(0, settings["zeal_dir"])
 
+tk.Label(height=1).pack()  # Spacer
+
 tk.Label(root, text="QuarmTool Directory:", font=header_font).pack()
 quarmtool_dir_frame = tk.Frame(root)
 quarmtool_dir_frame.pack()
@@ -686,10 +745,26 @@ quarmtool_version_dropdown.pack()
 if "quarmtool_dir" in settings:
     quarmtool_dir_entry.insert(0, settings["quarmtool_dir"])
 
+buttons_frame = tk.Frame(root)
+buttons_frame.pack(pady=5)
+
+update_zeal_button = tk.Button(buttons_frame, text="Update/Install Zeal", command=update_zeal)
+update_zeal_button.pack(side=tk.LEFT, padx=5)
+
+update_quarmtool_button = tk.Button(buttons_frame, text="Update/Install QuarmTool", command=update_quarmtool)
+update_quarmtool_button.pack(side=tk.LEFT, padx=5)
+
+update_all_button = tk.Button(buttons_frame, text="Update/Install Zeal and QT", command=update_all, height=1, font=("bold"))
+update_all_button.pack(side=tk.LEFT, padx=5)
+update_all_button.pack(padx=5, pady=5)
+
+separator = tk.Frame(root, height=2, bd=1, relief=tk.SUNKEN, bg="lightgray")
+separator.pack(fill=tk.X, padx=10, pady=10)
+
 # Create Install Custom UI's section
 tk.Label(root, text="Install Custom UI's:", font=header_font).pack()
 ui_checkboxes_frame = tk.Frame(root)
-ui_checkboxes_frame.pack(pady=10)
+ui_checkboxes_frame.pack(pady=5)
 
 nillipuss_1080p_var = tk.BooleanVar()
 nillipuss_1080p_var.set(False)
@@ -711,24 +786,20 @@ qqui_var = tk.BooleanVar()
 qqui_var.set(False)
 tk.Checkbutton(ui_checkboxes_frame, text="qqui (Calmethar Edition) [WinRar/Unrar Required]", variable=qqui_var).pack(anchor=tk.W)
 
-# Create and place the Update and Launch buttons
 buttons_frame = tk.Frame(root)
-buttons_frame.pack(pady=10)
+buttons_frame.pack(pady=5)
 
-update_zeal_button = tk.Button(buttons_frame, text="Update/Install Zeal", command=update_zeal)
-update_zeal_button.pack(side=tk.LEFT, padx=5)
-
-update_quarmtool_button = tk.Button(buttons_frame, text="Update/Install QuarmTool", command=update_quarmtool)
-update_quarmtool_button.pack(side=tk.LEFT, padx=5)
-
-update_ui_button = tk.Button(buttons_frame, text="Install Selected UI Files", command=install_ui_files)
+update_ui_button = tk.Button(buttons_frame, text="Update/Install Selected UI Files", command=install_ui_files)
 update_ui_button.pack(side=tk.LEFT, padx=5)
+
+separator = tk.Frame(root, height=2, bd=1, relief=tk.SUNKEN, bg="lightgray")
+separator.pack(fill=tk.X, padx=10, pady=10)
 
 # Buttons for "Optimize Settings" and "Advanced Configurator"
 tk.Label(root, text="Settings:", font=header_font).pack()
 
 buttons_frame = tk.Frame(root)
-buttons_frame.pack(pady=10)
+buttons_frame.pack(pady=5)
 
 optimize_button = tk.Button(buttons_frame, text="Apply Suggested Settings", command=optimize_settings)
 optimize_button.pack(side=tk.LEFT, padx=5)
@@ -736,17 +807,26 @@ optimize_button.pack(side=tk.LEFT, padx=5)
 advanced_config_button = tk.Button(buttons_frame, text="Advanced Configurator", command=open_advanced_configurator)
 advanced_config_button.pack(side=tk.LEFT, padx=5)
 
+separator = tk.Frame(root, height=2, bd=1, relief=tk.SUNKEN, bg="lightgray")
+separator.pack(fill=tk.X, padx=10, pady=10)
+
 # Buttons for "Play" section
 tk.Label(root, text="Play:", font=header_font).pack()
 
 play_buttons_frame = tk.Frame(root)
-play_buttons_frame.pack(pady=10)
+play_buttons_frame.pack(pady=5)
 
 run_quarmtool_button = tk.Button(play_buttons_frame, text="Run QuarmTool", command=run_quarmtool)
 run_quarmtool_button.pack(side=tk.LEFT, padx=5)
 
 run_project_quarm_button = tk.Button(play_buttons_frame, text="Run Project Quarm", command=run_project_quarm)
 run_project_quarm_button.pack(side=tk.LEFT, padx=5)
+
+tk.Label(height=1).pack()  # Spacer
+
+launch_all_button = tk.Button(play_buttons_frame, text="Launch All", command=launch_all, height=1, font=("bold"))
+launch_all_button.pack(side=tk.LEFT, padx=5)
+launch_all_button.pack(padx=5, pady=5)
 
 # Create a frame to hold the log widget and scrollbar
 log_frame = tk.Frame(root)
