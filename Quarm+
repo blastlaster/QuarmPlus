@@ -1,3 +1,4 @@
+import sys
 import os
 import shutil
 import requests
@@ -8,15 +9,64 @@ import rarfile
 import json
 import configparser
 import traceback
+import psutil
 import time
 import logging
 import tkinter as tk
-import webbrowser
 from tkinter import ttk, colorchooser, messagebox, filedialog
+import subprocess
+from packaging import version
 
 settings_file = "settings.json"
 
-import traceback
+def preserve_custom_tga_files(zeal_dir):
+    """Preserves custom TGA files from the targetrings folder during Zeal updates."""
+    try:
+        targetrings_path = os.path.join(zeal_dir, 'uifiles', 'zeal', 'targetrings')
+        
+        if not os.path.exists(targetrings_path):
+            return None  # No files to preserve
+            
+        preserved_files = {}
+        if os.path.exists(targetrings_path):
+            for file in os.listdir(targetrings_path):
+                if file.lower().endswith('.tga'):
+                    file_path = os.path.join(targetrings_path, file)
+                    with open(file_path, 'rb') as f:
+                        preserved_files[file] = f.read()
+        
+        return preserved_files
+        
+    except Exception as e:
+        log_message(f"Error preserving TGA files: {str(e)}", "red")
+        return None
+
+def restore_custom_tga_files(zeal_dir, preserved_files):
+    """Restores preserved TGA files after Zeal update."""
+    if not preserved_files:
+        return
+        
+    try:
+        targetrings_path = os.path.join(zeal_dir, 'uifiles', 'zeal', 'targetrings')
+        os.makedirs(targetrings_path, exist_ok=True)
+        
+        current_files = set()
+        if os.path.exists(targetrings_path):
+            current_files = {f.lower() for f in os.listdir(targetrings_path) if f.lower().endswith('.tga')}
+        
+        restored_count = 0
+        for filename, content in preserved_files.items():
+            if filename.lower() not in current_files:
+                file_path = os.path.join(targetrings_path, filename)
+                with open(file_path, 'wb') as f:
+                    f.write(content)
+                restored_count += 1
+        
+        if restored_count > 0:
+            log_message(f"Restored {restored_count} custom TGA files", "green")
+            
+    except Exception as e:
+        log_message(f"Error restoring TGA files: {str(e)}", "red")
 
 class CustomDropdown(tk.Frame):
     def __init__(self, master, variable, values, **kwargs):
@@ -41,6 +91,112 @@ class CustomDropdown(tk.Frame):
 
     def select_value(self, value):
         self.variable.set(value)
+
+class UIInstallationStatus(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("UI Installation Status")
+        self.geometry("300x200")
+        self.transient(parent)
+        self.grab_set()
+
+        self.status_text = tk.Text(self, wrap=tk.WORD, width=40, height=10)
+        self.status_text.pack(padx=10, pady=10, expand=True, fill=tk.BOTH)
+
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(self, variable=self.progress_var, maximum=100)
+        self.progress_bar.pack(padx=10, pady=10, fill=tk.X)
+
+    def update_status(self, message):
+        self.status_text.insert(tk.END, message + "\n")
+        self.status_text.see(tk.END)
+        self.update()
+
+    def update_progress(self, value):
+        self.progress_var.set(value)
+        self.update()
+
+class ShortcutsDialog(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Shortcuts Applied")
+        
+        # Configure window
+        self.geometry("300x280")
+        self.resizable(False, False)
+        self.configure(bg="white")
+        self.transient(parent)
+        self.grab_set()
+        
+        # Remove window decorations except title bar and close button
+        if sys.platform == "win32":
+            self.attributes("-toolwindow", True)
+        
+        # Create main container
+        main_frame = tk.Frame(self, bg="white", padx=20, pady=15)
+        main_frame.pack(expand=True, fill="both")
+        
+        # Title with icon
+        title_frame = tk.Frame(main_frame, bg="white")
+        title_frame.pack(fill="x", pady=(0, 10))
+        
+        icon_label = tk.Label(title_frame, text="⚙️", bg="white", font=("Segoe UI", 16))
+        icon_label.pack(side="left", padx=(0, 8))
+        
+        title_label = tk.Label(title_frame, text="Shortcuts Applied", 
+                             bg="white", font=("Segoe UI", 12, "bold"))
+        title_label.pack(side="left")
+        
+        # "Changed:" label
+        changed_label = tk.Label(main_frame, text="Changed:", 
+                               bg="white", font=("Segoe UI", 10))
+        changed_label.pack(anchor="w", pady=(0, 5))
+        
+        # Shortcuts list
+        shortcuts = [
+            ("WASD", "keys to move"),
+            ("Q", "to auto-attack"),
+            ("E", "to duck"),
+            ("\\", "to auto-run"),
+            ("TAB", "to cycle nearby NPCs"),
+            ("`", "to cycle PCs"),
+            ("B", "to open all containers")
+        ]
+        
+        for key, action in shortcuts:
+            shortcut_frame = tk.Frame(main_frame, bg="white")
+            shortcut_frame.pack(fill="x", pady=2)
+            
+            key_label = tk.Label(shortcut_frame, text=key,
+                               bg="white", font=("Segoe UI", 9, "bold"))
+            key_label.pack(side="left")
+            
+            action_label = tk.Label(shortcut_frame, text=f" {action}",
+                                  bg="white", font=("Segoe UI", 9))
+            action_label.pack(side="left")
+        
+        # OK button
+        button_style = {
+            'font': ('Segoe UI', 10),
+            'fg': 'white',
+            'bg': '#0078D4',
+            'activebackground': '#106EBE',
+            'activeforeground': 'white',
+            'relief': 'flat',
+            'width': 10
+        }
+        
+        ok_button = tk.Button(main_frame, text="OK", 
+                            command=self.destroy, **button_style)
+        ok_button.pack(pady=(15, 0))
+        
+        # Center the window on screen
+        self.update_idletasks()
+        width = self.winfo_width()
+        height = self.winfo_height()
+        x = (self.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.winfo_screenheight() // 2) - (height // 2)
+        self.geometry(f'+{x}+{y}')
 
 class AdvancedConfiguratorWindow(tk.Toplevel):
     def __init__(self, parent, zeal_dir):
@@ -69,18 +225,21 @@ class AdvancedConfiguratorWindow(tk.Toplevel):
             'Bluecon': 'bool',
             'ZealInput': 'bool',
             'FloatingDamage': 'bool',
-            'HideLooted': 'bool',
-            'TargetRing': 'bool'
+            'UseUmbra': 'dropdown'
         }
         self.chat_timestamp_options = {
             'None': 1,
             'Short': 2,
             'Long': 3
-            }
+        }
         self.nofpslimiter_options = {
             'On (recommended)': 1,
             'Off': 0,
-            }
+        }
+        self.useumbra_options = {
+            'TRUE': 'TRUE',
+            'FALSE': 'FALSE'
+        }
 
         try:
             self.current_settings = self.load_current_settings()
@@ -96,12 +255,88 @@ class AdvancedConfiguratorWindow(tk.Toplevel):
             print(f"Error creating widgets: {str(e)}")
             print(traceback.format_exc())
         
-        self.bind_mousewheel_to_canvas()
+        self.setup_mousewheel_binding()
         self.update_idletasks()
         self.geometry(f"{self.winfo_reqwidth()}x{self.winfo_reqheight()}+{parent.winfo_x()+parent.winfo_width()+10}+{parent.winfo_y()}")
         self.transient(parent)
         self.grab_set()
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
+
+    def create_widgets(self):
+        # Create main frame
+        main_frame = tk.Frame(self)
+        main_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+        # Create canvas and scrollbar
+        self.canvas = tk.Canvas(main_frame)
+        scrollbar = tk.Scrollbar(main_frame, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = tk.Frame(self.canvas)
+
+        # Configure scrollable frame
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+
+        # Create window inside canvas
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Create widgets dictionary
+        self.widgets = {}
+        
+        # Add settings widgets
+        for setting, type_ in self.settings.items():
+            frame = tk.Frame(self.scrollable_frame)
+            frame.pack(fill=tk.X, padx=5, pady=5)
+            
+            label = tk.Label(frame, text=f"{setting}:")
+            label.pack(side=tk.LEFT)
+
+            if type_ == 'bool':
+                var = tk.BooleanVar(value=self.current_settings.get(setting, False))
+                widget = tk.Checkbutton(frame, variable=var)
+            elif type_ == 'dropdown' and setting == 'ChatTimestamps':
+                var = tk.StringVar(value=self.get_chat_timestamp_key(self.current_settings.get(setting, 1)))
+                widget = CustomDropdown(frame, var, list(self.chat_timestamp_options.keys()))
+                widget.config(width=150, height=30)
+            elif type_ == 'dropdown' and setting == 'NoFPSLimiter':
+                var = tk.StringVar(value=self.get_nofpslimiter_key(self.current_settings.get(setting, 1)))
+                widget = CustomDropdown(frame, var, list(self.nofpslimiter_options.keys()))
+                widget.config(width=150, height=20)
+            elif type_ == 'dropdown' and setting == 'UseUmbra':
+                var = tk.StringVar(value=self.current_settings.get(setting, 'TRUE'))
+                widget = CustomDropdown(frame, var, list(self.useumbra_options.keys()))
+                widget.config(width=150, height=20)
+            else:
+                var = tk.StringVar(value=str(self.current_settings.get(setting, '')))
+                widget = tk.Entry(frame, textvariable=var, width=10)
+
+            widget.pack(side=tk.RIGHT, padx=(0, 10))
+            self.widgets[setting] = var
+
+            if setting == 'Bluecon':
+                self.bluecon_var = var
+                self.bluecon_var.trace('w', self.toggle_color_picker)
+                self.color_button = tk.Button(frame, text="Choose Color", command=self.choose_color)
+                self.color_button.pack(side=tk.RIGHT, padx=(0, 10))
+                self.toggle_color_picker()
+
+        # Add apply button
+        apply_button = tk.Button(self.scrollable_frame, text="Apply Settings", command=self.apply_settings)
+        apply_button.pack(pady=10)
+
+        # Pack canvas and scrollbar
+        self.canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+    def get_nofpslimiter_key(self, value):
+        return next((k for k, v in self.nofpslimiter_options.items() if v == value), 'On (recommended)')
+
+    def setup_mousewheel_binding(self):
+        def _on_mousewheel(event):
+            self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
     def load_current_settings(self):
         eqclient_path = os.path.join(self.zeal_dir, 'eqclient.ini')
@@ -124,71 +359,6 @@ class AdvancedConfiguratorWindow(tk.Toplevel):
                     settings[key] = int(config.get(section, key))
         return settings
 
-    def create_widgets(self):
-        main_frame = tk.Frame(self)
-        main_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
-
-        self.canvas = tk.Canvas(main_frame)
-        scrollbar = tk.Scrollbar(main_frame, orient="vertical", command=self.canvas.yview)
-        self.scrollable_frame = tk.Frame(self.canvas)
-
-        self.scrollable_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(
-                scrollregion=self.canvas.bbox("all")
-            )
-        )
-
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=scrollbar.set)
-
-        self.widgets = {}
-        for setting, type_ in self.settings.items():
-            frame = tk.Frame(self.scrollable_frame)
-            frame.pack(fill=tk.X, padx=5, pady=5)
-            
-            label = tk.Label(frame, text=f"{setting}:")
-            label.pack(side=tk.LEFT)
-
-            if type_ == 'bool':
-                var = tk.BooleanVar(value=self.current_settings.get(setting, False))
-                widget = tk.Checkbutton(frame, variable=var)
-            elif type_ == 'dropdown' and setting == 'ChatTimestamps':
-                var = tk.StringVar(value=self.get_chat_timestamp_key(self.current_settings.get(setting, 1)))
-                widget = CustomDropdown(frame, var, list(self.chat_timestamp_options.keys()))
-                widget.config(width=150, height=30)
-            elif type_ == 'dropdown' and setting == 'NoFPSLimiter':
-                var = tk.StringVar(value=self.get_chat_timestamp_key(self.current_settings.get(setting, 1)))
-                widget = CustomDropdown(frame, var, list(self.nofpslimiter_options.keys()))
-                widget.config(width=150, height=20)
-            else:
-                var = tk.StringVar(value=str(self.current_settings.get(setting, '')))
-                widget = tk.Entry(frame, textvariable=var, width=10)
-
-            widget.pack(side=tk.RIGHT, padx=(0, 10))
-            self.widgets[setting] = var
-
-            if setting == 'Bluecon':
-                self.bluecon_var = var
-                self.bluecon_var.trace('w', self.toggle_color_picker)
-                self.color_button = tk.Button(frame, text="Choose Color", command=self.choose_color)
-                self.color_button.pack(side=tk.RIGHT, padx=(0, 10))
-                self.toggle_color_picker()
-
-        apply_button = tk.Button(self.scrollable_frame, text="Apply Settings", command=self.apply_settings)
-        apply_button.pack(pady=10)
-
-        self.canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-    # ... (rest of the methods remain the same)
-
-    def bind_mousewheel_to_canvas(self):
-        def _on_mousewheel(event):
-            self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-
-        self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
-
     def toggle_color_picker(self, *args):
         if self.bluecon_var.get():
             self.color_button.pack(side=tk.RIGHT, padx=(0, 10))
@@ -196,9 +366,9 @@ class AdvancedConfiguratorWindow(tk.Toplevel):
             self.color_button.pack_forget()
 
     def choose_color(self):
-        self.attributes('-topmost', True)  # Keep window on top
+        self.attributes('-topmost', True)
         color = colorchooser.askcolor(title="Choose color", parent=self)
-        self.attributes('-topmost', False)  # Remove topmost attribute
+        self.attributes('-topmost', False)
         if color[1]:
             r, g, b = [int(x) for x in color[0]]
             self.widgets['User_70_Red'] = tk.IntVar(value=r)
@@ -219,56 +389,130 @@ class AdvancedConfiguratorWindow(tk.Toplevel):
         config.optionxform = str
         config.read(eqclient_path)
 
+        if 'Defaults' not in config.sections():
+            config.add_section('Defaults')
+
         for section in config.sections():
             for setting, var in self.widgets.items():
-                if config.has_option(section, setting):
+                if config.has_option(section, setting) or setting == 'UseUmbra':
                     value = var.get()
                     if isinstance(value, bool):
                         value = 'TRUE' if value else 'FALSE'
                     elif setting == 'ChatTimestamps':
                         value = str(self.chat_timestamp_options[value])
-                    config.set(section, setting, str(value))
+                    elif setting == 'UseUmbra':
+                        config.set('Defaults', 'UseUmbra', value)
+                        continue
+                    
+                    if setting != 'UseUmbra':
+                        config.set(section, setting, str(value))
 
-        # Handle NoFPSLimiter specifically
         if 'Options' not in config.sections():
             config.add_section('Options')
-        no_fps_limiter_value = '1' if self.widgets['NoFPSLimiter'].get() else '0'
-        config.set('Options', 'NoFPSlimiter', no_fps_limiter_value)
+        no_fps_limiter_value = '1' if self.widgets['NoFPSLimiter'].get() == 'On (recommended)' else '0'
+        config.set('Options', 'NoFPSLimiter', no_fps_limiter_value)
 
         with open(eqclient_path, 'w') as configfile:
             config.write(configfile)
 
         messagebox.showinfo("Settings Applied", "Your settings have been applied successfully.")
-        self.destroy()  # Close the window after applying settings
+        self.destroy()
 
     def on_closing(self):
-        self.parent.focus_set()  # Give focus back to the parent window
-        self.destroy()  # Close the configurator window
+        self.parent.focus_set()
+        self.destroy()
 
+def apply_wasd_shortcuts():
+    zeal_dir = zeal_dir_entry.get()
+    if not zeal_dir:
+        messagebox.showerror("Error", "Please select your Zeal directory first.")
+        return
+        
+    eqclient_path = os.path.join(zeal_dir, 'eqclient.ini')
+    
+    try:
+        config = configparser.ConfigParser()
+        config.optionxform = str
+        config.read(eqclient_path)
+        
+        if 'KeyMaps' not in config:
+            config['KeyMaps'] = {}
+            
+        keymaps = {
+            'KEYMAP_FORWARD': 'w',
+            'KEYMAP_BACK': 's',
+            'KEYMAP_RIGHT': 'd',
+            'KEYMAP_LEFT': 'a',
+            'KEYMAP_AUTOPRIM': 'q',
+            'KEYMAP_DUCK': 'e',
+            'KEYMAP_AUTORUN': '\\',
+            'KEYMAP_CycleTargetNPC': 'TAB',
+            'KEYMAP_CycleTargetPC': '`',
+            'KEYMAP_OpenCloseContainers': 'b'
+        }
+        
+        for key, value in keymaps.items():
+            config['KeyMaps'][key] = value
+            
+        with open(eqclient_path, 'w') as configfile:
+            config.write(configfile)
+            
+        log_message("Applied WASD+ shortcut modifications to eqclient.ini", "green")
+        
+        # Show the modern dialog
+        ShortcutsDialog(root)
+        
+    except Exception as e:
+        log_message(f"Error applying WASD shortcuts: {str(e)}", "red")
+        messagebox.showerror("Error", f"Failed to apply WASD shortcuts: {str(e)}")
 
-class UIInstallationStatus(tk.Toplevel):
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.title("UI Installation Status")
-        self.geometry("300x200")
-        self.transient(parent)
-        self.grab_set()
+def update_pqdi4all():
+    quarmtool_dir = quarmtool_dir_entry.get()
+    if not quarmtool_dir:
+        messagebox.showerror("Error", "Please select your QuarmTool directory first.")
+        return
 
-        self.status_text = tk.Text(self, wrap=tk.WORD, width=40, height=10)
-        self.status_text.pack(padx=10, pady=10, expand=True, fill=tk.BOTH)
+    log_message("Starting update process for pqdi4all...", "black")
+    try:
+        api_url = "https://api.github.com/repos/blastlaster/pqdi4all/releases/latest"
+        response = requests.get(api_url)
+        if response.status_code == 200:
+            latest_release = response.json()
+            download_url = latest_release['assets'][0]['browser_download_url']
+            version = latest_release['tag_name']
+            
+            download_path = os.path.join(quarmtool_dir, "pqdi4all.exe")
+            
+            response = requests.get(download_url, stream=True)
+            with open(download_path, 'wb') as f:
+                shutil.copyfileobj(response.raw, f)
+                
+            log_message(f"Successfully installed pqdi4all version {version}", "green")
+            return True
+        else:
+            log_message("Failed to fetch pqdi4all release information", "red")
+            return False
+    except Exception as e:
+        log_message(f"Error updating pqdi4all: {str(e)}", "red")
+        return False
 
-        self.progress_var = tk.DoubleVar()
-        self.progress_bar = ttk.Progressbar(self, variable=self.progress_var, maximum=100)
-        self.progress_bar.pack(padx=10, pady=10, fill=tk.X)
-
-    def update_status(self, message):
-        self.status_text.insert(tk.END, message + "\n")
-        self.status_text.see(tk.END)
-        self.update()
-
-    def update_progress(self, value):
-        self.progress_var.set(value)
-        self.update()
+def run_pqdi4all():
+    quarmtool_dir = quarmtool_dir_entry.get()
+    if not quarmtool_dir:
+        messagebox.showerror("Error", "QuarmTool directory is not set. Please set the directory before running pqdi4all.")
+        return
+    
+    pqdi4all_path = os.path.join(quarmtool_dir, "pqdi4all.exe")
+    if not os.path.exists(pqdi4all_path):
+        messagebox.showerror("Error", "pqdi4all.exe not found in the specified directory.")
+        return
+    
+    try:
+        subprocess.Popen(pqdi4all_path, cwd=quarmtool_dir)
+        log_message("Started pqdi4all", "green")
+    except Exception as e:
+        log_message(f"Error running pqdi4all: {str(e)}", "red")
+        messagebox.showerror("Error", f"Failed to run pqdi4all: {str(e)}")
 
 def open_advanced_configurator():
     if not zeal_dir_entry.get():
@@ -325,8 +569,8 @@ def log_message(message, color):
     else:
         log_widget.insert(tk.END, message + "\n")
     log_widget.config(state=tk.DISABLED)
-    log_widget.see(tk.END)  # Automatically scroll to the bottom
-    log_widget.update()  # Force update to show new content immediately
+    log_widget.see(tk.END)
+    log_widget.update()
 
 def check_and_update(project_name, version, github_repo, install_dir, log_widget):
     try:
@@ -383,7 +627,6 @@ def download_with_retry(url, path, max_retries=3):
                         file.write(chunk)
                         downloaded_size += len(chunk)
                         
-                        # Calculate and log progress
                         if total_size > 0:
                             progress = (downloaded_size / total_size) * 100
                             log_message(f"Download progress: {progress:.2f}%", "black")
@@ -397,7 +640,6 @@ def download_with_retry(url, path, max_retries=3):
                 log_message(f"Max retries reached. Download failed.", "red")
                 return False
             
-            # Exponential backoff
             wait_time = 2 ** attempt
             log_message(f"Retrying in {wait_time} seconds...", "black")
             time.sleep(wait_time)
@@ -417,16 +659,18 @@ def install_ui_files():
     ui_files = [
         {"name": "Nillipuss UI 1080p", "url": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest", "var": nillipuss_1080p_var},
         {"name": "Nillipuss UI 1440p", "url": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest", "var": nillipuss_1440p_var},
-        {"name": "QRustle", "url": "https://api.github.com/repos/UnforgivunAL/QRustle/releases/latest", "var": qrustle_var},
+        {"name": "QRustle 1080p", "url": "https://github.com/user-attachments/files/17566105/Qrustle1080-Z5x.zip", "var": qrustle_1080p_var},
+        {"name": "QRustle 1440p", "url": "https://github.com/user-attachments/files/17566110/Qrustle1440-Z5x.zip", "var": qrustle_1440p_var},
         {"name": "DuxaUI", "url": "https://github.com/LordDemonos/Quarm.Guide/blob/master/assets/duxaUI.7z?raw=true", "var": duxaui_var},
-        {"name": "qqui (Calmethar Edition)", "url": "https://www.eqinterface.com/downloads/download.php?id=6959", "var": qqui_var}
+        {"name": "qqui (Calmethar Edition)", "url": "https://www.eqinterface.com/downloads/download.php?id=6959", "var": qqui_var},
+        {"name": "d3pda UI", "url": "https://api.github.com/repos/defaultex/d3pda-quarm/releases/latest", "var": d3pda_var}
     ]
 
     total_files = sum(1 for ui_file in ui_files if ui_file["var"].get())
     files_processed = 0
 
     for ui_file in ui_files:
-        if ui_file["var"].get():  # Check if the UI file checkbox is selected
+        if ui_file["var"].get():
             try:
                 status_window.update_status(f"Processing {ui_file['name']}...")
 
@@ -436,23 +680,34 @@ def install_ui_files():
                 elif ui_file["name"] == "DuxaUI":
                     download_url = ui_file["url"]
                     file_extension = ".7z"
-                else:
-                    response = requests.get(ui_file["url"])
-                    if response.status_code != 200:
-                        log_message(f"Failed to fetch release info for {ui_file['name']}", "red")
-                        continue
-                    download_url = response.json()['assets'][0]['browser_download_url']
+                elif ui_file["name"].startswith("QRustle"):
+                    download_url = ui_file["url"]
                     file_extension = ".zip"
+                else:
+                    try:
+                        response = requests.get(ui_file["url"])
+                        response.raise_for_status()
+                        release_data = response.json()
+                        if 'assets' in release_data and len(release_data['assets']) > 0:
+                            download_url = release_data['assets'][0]['browser_download_url']
+                        else:
+                            raise ValueError(f"No assets found for {ui_file['name']}")
+                        file_extension = ".zip"
+                    except Exception as e:
+                        log_message(f"Error fetching release info for {ui_file['name']}: {str(e)}", "red")
+                        continue
 
                 download_path = os.path.join(zeal_dir, "uifiles")
                 os.makedirs(download_path, exist_ok=True)
                 download_path = os.path.join(download_path, f"{ui_file['name']}{file_extension}")
 
+                log_message(f"Downloading {ui_file['name']} from {download_url}", "black")
                 r = requests.get(download_url, stream=True)
+                r.raise_for_status()
+                
                 with open(download_path, 'wb') as f:
                     shutil.copyfileobj(r.raw, f)
 
-                # Extract downloaded files directly into /uifiles/ directory
                 if file_extension == ".7z":
                     with py7zr.SevenZipFile(download_path, mode='r') as z:
                         z.extractall(os.path.join(zeal_dir, "uifiles"))
@@ -463,44 +718,27 @@ def install_ui_files():
                     with zipfile.ZipFile(download_path, 'r') as zip_ref:
                         zip_ref.extractall(os.path.join(zeal_dir, "uifiles"))
 
-                # Clean up temp files
                 os.remove(download_path)
                 ui_files_to_install.append(ui_file['name'])
-                ui_files_to_install.append(ui_file['name'])
                 log_message(f"Installed {ui_file['name']} UI files to {zeal_dir}/uifiles", "green")
+
+                files_processed += 1
+                status_window.update_progress((files_processed / total_files) * 100)
+
             except Exception as e:
                 log_message(f"Error installing {ui_file['name']} UI files: {str(e)}", "red")
+                continue
 
-    # Call the function to delete EQUI_OptionsWindow.html after installing UI files
     delete_equi_options_window(zeal_dir)
 
     if ui_files_to_install:
         messagebox.showinfo("Success", f"Installed UI files: {', '.join(ui_files_to_install)}")
     else:
         messagebox.showinfo("Information", "No UI files were installed.")
-                
-        status_window.update_status(f"Installed {ui_file['name']} UI files.")
-        ui_files_to_install.append(ui_file['name'])
-                
-    try:
-        files_processed += 1
-        status_window.update_progress((files_processed / total_files) * 100)
-    except Exception as e:
-        status_window.update_status(f"Error installing {ui_file['name']} UI files: {str(e)}")
-        log_message(f"Error installing {ui_file['name']} UI files: {str(e)}", "red")
-
-    delete_equi_options_window(zeal_dir)
 
     status_window.update_status("Installation complete.")
     status_window.update_progress(100)
-
     status_window.destroy()
-
-def toggle_panel():
-    if panel_frame.winfo_ismapped():
-        panel_frame.pack_forget()  # Hide the panel if it's visible
-    else:
-        panel_frame.pack(fill=tk.X, pady=10)  # Show the panel if it's hidden
 
 def delete_uifiles_zeal(zeal_dir):
     uifiles_zeal_path = os.path.join(zeal_dir, 'uifiles', 'zeal')
@@ -526,7 +764,7 @@ def delete_equi_options_window(zeal_dir):
     
     uifiles_dir = os.path.join(main_zeal_dir, 'uifiles')
     for root, dirs, files in os.walk(uifiles_dir):
-        if root != os.path.join(uifiles_dir, 'zeal'):  # Skip the /uifiles/zeal directory
+        if root != os.path.join(uifiles_dir, 'zeal'):
             if 'EQUI_OptionsWindow.html' in files:
                 file_to_delete = os.path.join(root, 'EQUI_OptionsWindow.html')
                 try:
@@ -539,11 +777,18 @@ def update_zeal():
     zeal_dir = zeal_dir_entry.get()
     log_message("Starting update process for Zeal...", "black")
     
+    # Preserve custom TGA files before deletion
+    preserved_files = preserve_custom_tga_files(zeal_dir)
+    
     # Delete the /uifiles/zeal folder before updating
     delete_uifiles_zeal(zeal_dir)
     
     zeal_version = zeal_version_var.get()
     zeal_updated = check_and_update("Zeal", zeal_version, "iamclint/Zeal", zeal_dir, log_widget)
+    
+    # Restore custom TGA files after update
+    restore_custom_tga_files(zeal_dir, preserved_files)
+    
     if not zeal_updated:
         log_message("Zeal is already up to date.", "green")
 
@@ -566,17 +811,25 @@ def update_quarmtool():
     if not quarmtool_updated:
         log_message("QuarmTool is already up to date.", "green")
 
-# New function to update all
-def update_all():
+def update_all(include_pqdi4all=True):
+    """
+    Updates all selected components.
+    
+    Args:
+        include_pqdi4all (bool): Whether to include pqdi4all in the update
+    """
+    log_message("Starting update process for all components...", "black")
+    
+    # Always update Zeal and QuarmTool
     update_zeal()
     update_quarmtool()
-    print("Zeal and QT have been updated.")
-
-# New function to launch all
-def launch_all():
-    run_quarmtool()
-    run_project_quarm()
-    print("You're in our world now.")
+    
+    # Update pqdi4all only if specified
+    if include_pqdi4all:
+        update_pqdi4all()
+        log_message("Completed updating Zeal, QuarmTool, and pqdi4all", "green")
+    else:
+        log_message("Completed updating Zeal and QuarmTool", "green")
 
 def run_quarmtool():
     quarmtool_dir = quarmtool_dir_entry.get()
@@ -591,8 +844,10 @@ def run_quarmtool():
     
     try:
         subprocess.Popen(quarmtool_path, cwd=quarmtool_dir)
+        log_message("Started QuarmTool", "green")
     except Exception as e:
         messagebox.showerror("Error", f"Failed to run QuarmTool: {str(e)}")
+        log_message(f"Error running QuarmTool: {str(e)}", "red")
 
 def run_project_quarm():
     zeal_dir = zeal_dir_entry.get()
@@ -608,8 +863,116 @@ def run_project_quarm():
     try:
         os.chdir(zeal_dir)
         subprocess.Popen(eqgame_path)
+        log_message("Started Project Quarm", "green")
     except Exception as e:
         messagebox.showerror("Error", f"Failed to run Project Quarm: {str(e)}")
+        log_message(f"Error running Project Quarm: {str(e)}", "red")
+
+def is_process_running(process_name):
+    """
+    Check if a process with the given name is running from the correct directory.
+    
+    Args:
+        process_name (str): Name of the process to check (e.g., 'eqgame.exe')
+    
+    Returns:
+        bool: True if process is running from correct directory, False otherwise
+    """
+    try:
+        # Normalize the Zeal directory path
+        zeal_dir = os.path.normpath(zeal_dir_entry.get()).lower()
+        
+        for proc in psutil.process_iter(['name']):
+            try:
+                # Check if process name matches
+                if proc.info['name'].lower() == process_name.lower():
+                    try:
+                        process = psutil.Process(proc.pid)
+                        
+                        # For Project Quarm, verify it's running from the correct directory
+                        if process_name.lower() == 'eqgame.exe':
+                            try:
+                                # Get the full path of the running process and normalize it
+                                proc_path = os.path.normpath(process.exe()).lower()
+                                expected_path = os.path.normpath(os.path.join(zeal_dir, 'eqgame.exe')).lower()
+                                
+                                # Compare the full paths
+                                if proc_path == expected_path:
+                                    log_message(f"Found existing eqgame.exe at {proc_path}", "black")
+                                    return True
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                continue
+                        else:
+                            # For other applications, just check if they're running
+                            return True
+                            
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+                        
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+                
+    except Exception as e:
+        log_message(f"Error checking if process {process_name} is running: {str(e)}", "red")
+        
+    return False
+
+def launch_all():
+    """
+    Launches applications only if they're not already running.
+    For Project Quarm, only launches if it's not already running from the correct Zeal directory.
+    """
+    log_message("Checking and launching applications...", "black")
+    success_count = 0
+    total_count = 0
+    
+    # Define applications with their process names
+    applications = [
+        {
+            "name": "Project Quarm",  # Launch Project Quarm first
+            "process": "eqgame.exe",
+            "run": run_project_quarm
+        },
+        {
+            "name": "QuarmTool",
+            "process": "QuarmTool.exe",
+            "run": run_quarmtool
+        },
+        {
+            "name": "pqdi4all",
+            "process": "pqdi4all.exe",
+            "run": run_pqdi4all
+        }
+    ]
+    
+    for app in applications:
+        try:
+            total_count += 1
+            
+            # Check if process is running
+            if is_process_running(app["process"]):
+                log_message(f"{app['name']} is already running", "black")
+                success_count += 1
+                continue
+                
+            log_message(f"Launching {app['name']}...", "black")
+            app["run"]()
+            
+            # Add longer delay after launching Project Quarm
+            if app["name"] == "Project Quarm":
+                time.sleep(2)
+            else:
+                time.sleep(1)
+                
+            success_count += 1
+            
+        except Exception as e:
+            log_message(f"Failed to run {app['name']}: {str(e)}", "red")
+    
+    if success_count > 0:
+        log_message(f"Successfully handled {success_count} of {total_count} applications", "green")
+    else:
+        log_message(f"Failed to handle any applications", "red")
 
 def optimize_settings():
     zeal_dir = zeal_dir_entry.get()
@@ -627,7 +990,6 @@ def optimize_settings():
     config.optionxform = str
     config.read(eqclient_path)
     
-    # Settings to optimize
     settings_to_optimize = {
         'WindowedMode': 'FALSE',
         'NewUI': 'TRUE',
@@ -647,200 +1009,215 @@ def optimize_settings():
         'ChatTimestamps': '2',
         'Bluecon': 'TRUE',
         'ZealInput': 'TRUE',
-        'FloatingDamage': 'TRUE',
-        'HideLooted': 'FALSE',
-        'TargetRing': 'TRUE'
+        'FloatingDamage': 'TRUE'
     }
     
-    # Iterate through all sections and update settings if they exist
     for section in config.sections():
         for key, value in settings_to_optimize.items():
             if config.has_option(section, key):
                 config.set(section, key, value)
     
-    # Update specific settings that require special handling
     config['VideoMode']['Width'] = str(root.winfo_screenwidth())
     config['VideoMode']['Height'] = str(root.winfo_screenheight())
     
-    # Ensure NoFPSLimiter=1 is in the [Options] section
     if 'Options' not in config:
         config['Options'] = {}
     config['Options']['NoFPSLimiter'] = '1'
     
-    # Write the changes back to the ini file
     with open(eqclient_path, 'w') as configfile:
         config.write(configfile)
     
+    log_message("Settings have been optimized", "green")
     messagebox.showinfo("Optimization Complete", "Your settings have been optimized.")
 
 # Create the main window
 if __name__ == "__main__":
     root = tk.Tk()
-    root.title("Quarm+ v8.2")
+    root.title("Quarm+ v8.3")
     root.geometry("500x900")
 
     # Load saved settings
     settings = load_settings()
 
-# Create and place the directory input fields
-header_font = ('Helvetica', 12)
+    # Directory input fields
+    header_font = ('Helvetica', 12)
 
-tk.Label(root, text="Zeal Directory:", font=header_font).pack()
-zeal_dir_frame = tk.Frame(root)
-zeal_dir_frame.pack()
-zeal_dir_entry = tk.Entry(zeal_dir_frame, width=50)
-zeal_dir_entry.pack(side=tk.LEFT)
-zeal_dir_button = tk.Button(zeal_dir_frame, text="Browse", command=lambda: browse_directory(zeal_dir_entry))
-zeal_dir_button.pack(side=tk.LEFT)
-zeal_notice = tk.Label(zeal_dir_frame, text="")
-zeal_notice.pack(side=tk.LEFT, padx=10)
+    tk.Label(root, text="Zeal Directory:", font=header_font).pack()
+    zeal_dir_frame = tk.Frame(root)
+    zeal_dir_frame.pack()
+    zeal_dir_entry = tk.Entry(zeal_dir_frame, width=50)
+    zeal_dir_entry.pack(side=tk.LEFT)
+    zeal_dir_button = tk.Button(zeal_dir_frame, text="Browse", command=lambda: browse_directory(zeal_dir_entry))
+    zeal_dir_button.pack(side=tk.LEFT)
+    zeal_notice = tk.Label(zeal_dir_frame, text="")
+    zeal_notice.pack(side=tk.LEFT, padx=10)
 
-# Automatically fill Zeal version dropdown
-tk.Label(root, text="Select Zeal Version:").pack()
-zeal_version_var = tk.StringVar(root)
-zeal_versions = fetch_versions("iamclint/Zeal")
-if zeal_versions:
-    zeal_version_var.set(zeal_versions[0])  # Select the most recent version by default
-zeal_version_dropdown = tk.OptionMenu(root, zeal_version_var, *zeal_versions)
-zeal_version_dropdown.pack()
+    # Zeal version dropdown
+    tk.Label(root, text="Select Zeal Version:").pack()
+    zeal_version_var = tk.StringVar(root)
+    zeal_versions = fetch_versions("iamclint/Zeal")
+    if zeal_versions:
+        zeal_version_var.set(zeal_versions[0])
+    zeal_version_dropdown = tk.OptionMenu(root, zeal_version_var, *zeal_versions)
+    zeal_version_dropdown.pack()
 
-if "zeal_dir" in settings:
-    zeal_dir_entry.insert(0, settings["zeal_dir"])
+    if "zeal_dir" in settings:
+        zeal_dir_entry.insert(0, settings["zeal_dir"])
 
-tk.Label(height=1).pack()  # Spacer
+    tk.Label(height=1).pack()
 
-tk.Label(root, text="QuarmTool Directory:", font=header_font).pack()
-quarmtool_dir_frame = tk.Frame(root)
-quarmtool_dir_frame.pack()
-quarmtool_dir_entry = tk.Entry(quarmtool_dir_frame, width=50)
-quarmtool_dir_entry.pack(side=tk.LEFT)
-quarmtool_dir_button = tk.Button(quarmtool_dir_frame, text="Browse", command=lambda: browse_directory(quarmtool_dir_entry))
-quarmtool_dir_button.pack(side=tk.LEFT)
-quarmtool_notice = tk.Label(quarmtool_dir_frame, text="")
-quarmtool_notice.pack(side=tk.LEFT, padx=10)
+    tk.Label(root, text="QuarmTool Directory:", font=header_font).pack()
+    quarmtool_dir_frame = tk.Frame(root)
+    quarmtool_dir_frame.pack()
+    quarmtool_dir_entry = tk.Entry(quarmtool_dir_frame, width=50)
+    quarmtool_dir_entry.pack(side=tk.LEFT)
+    quarmtool_dir_button = tk.Button(quarmtool_dir_frame, text="Browse", command=lambda: browse_directory(quarmtool_dir_entry))
+    quarmtool_dir_button.pack(side=tk.LEFT)
+    quarmtool_notice = tk.Label(quarmtool_dir_frame, text="")
+    quarmtool_notice.pack(side=tk.LEFT, padx=10)
 
-# Automatically fill QuarmTool version dropdown
-tk.Label(root, text="Select QuarmTool Version:").pack()
-quarmtool_version_var = tk.StringVar(root)
-quarmtool_versions = fetch_versions("EJWellman/QuarmTool")
-if quarmtool_versions:
-    quarmtool_version_var.set(quarmtool_versions[0])  # Select the most recent version by default
-quarmtool_version_dropdown = tk.OptionMenu(root, quarmtool_version_var, *quarmtool_versions)
-quarmtool_version_dropdown.pack()
+    # QuarmTool version dropdown
+    tk.Label(root, text="Select QuarmTool Version:").pack()
+    quarmtool_version_var = tk.StringVar(root)
+    quarmtool_versions = fetch_versions("EJWellman/QuarmTool")
+    if quarmtool_versions:
+        quarmtool_version_var.set(quarmtool_versions[0])
+    quarmtool_version_dropdown = tk.OptionMenu(root, quarmtool_version_var, *quarmtool_versions)
+    quarmtool_version_dropdown.pack()
 
-if "quarmtool_dir" in settings:
-    quarmtool_dir_entry.insert(0, settings["quarmtool_dir"])
+    if "quarmtool_dir" in settings:
+        quarmtool_dir_entry.insert(0, settings["quarmtool_dir"])
 
-buttons_frame = tk.Frame(root)
-buttons_frame.pack(pady=5)
+    # Create top buttons frame
+    top_buttons_frame = tk.Frame(root)
+    top_buttons_frame.pack(pady=5)
 
-update_zeal_button = tk.Button(buttons_frame, text="Update/Install Zeal", command=update_zeal)
-update_zeal_button.pack(side=tk.LEFT, padx=5)
+    update_zeal_button = tk.Button(top_buttons_frame, text="Update/Install Zeal", command=update_zeal)
+    update_zeal_button.pack(side=tk.LEFT, padx=5)
 
-update_quarmtool_button = tk.Button(buttons_frame, text="Update/Install QuarmTool", command=update_quarmtool)
-update_quarmtool_button.pack(side=tk.LEFT, padx=5)
+    update_quarmtool_button = tk.Button(top_buttons_frame, text="Update/Install QuarmTool", command=update_quarmtool)
+    update_quarmtool_button.pack(side=tk.LEFT, padx=5)
 
-update_all_button = tk.Button(buttons_frame, text="Update/Install Zeal and QT", command=update_all, height=1, font=("bold"))
-update_all_button.pack(side=tk.LEFT, padx=5)
-update_all_button.pack(padx=5, pady=5)
+    update_pqdi4all_button = tk.Button(top_buttons_frame, text="Update/Install pqdi4all", command=update_pqdi4all)
+    update_pqdi4all_button.pack(side=tk.LEFT, padx=5)
 
-separator = tk.Frame(root, height=2, bd=1, relief=tk.SUNKEN, bg="lightgray")
-separator.pack(fill=tk.X, padx=10, pady=10)
+    # Create all buttons frame
+    all_buttons_frame = tk.Frame(root)
+    all_buttons_frame.pack(pady=5)
 
-# Create Install Custom UI's section
-tk.Label(root, text="Install Custom UI's:", font=header_font).pack()
-ui_checkboxes_frame = tk.Frame(root)
-ui_checkboxes_frame.pack(pady=5)
+    update_zeal_qt_button = tk.Button(all_buttons_frame, text="Update/Install Zeal and QT", 
+                                     command=lambda: update_all(False), height=1, font=("bold"))
+    update_zeal_qt_button.pack(side=tk.LEFT, padx=5)
 
-nillipuss_1080p_var = tk.BooleanVar()
-nillipuss_1080p_var.set(False)
-tk.Checkbutton(ui_checkboxes_frame, text="Nillipuss UI 1080p", variable=nillipuss_1080p_var).pack(anchor=tk.W)
+    update_all_button = tk.Button(all_buttons_frame, text="Update/Install All", 
+                                 command=lambda: update_all(True), height=1, font=("bold"))
+    update_all_button.pack(side=tk.LEFT, padx=5)
 
-nillipuss_1440p_var = tk.BooleanVar()
-nillipuss_1440p_var.set(False)
-tk.Checkbutton(ui_checkboxes_frame, text="Nillipuss UI 1440p", variable=nillipuss_1440p_var).pack(anchor=tk.W)
+    separator = tk.Frame(root, height=2, bd=1, relief=tk.SUNKEN, bg="lightgray")
+    separator.pack(fill=tk.X, padx=10, pady=10)
 
-qrustle_var = tk.BooleanVar()
-qrustle_var.set(False)
-tk.Checkbutton(ui_checkboxes_frame, text="QRustle", variable=qrustle_var).pack(anchor=tk.W)
+# UI Installation section
+    tk.Label(root, text="Install Custom UI's:", font=header_font).pack()
+    ui_checkboxes_frame = tk.Frame(root)
+    ui_checkboxes_frame.pack(pady=5)
 
-duxaui_var = tk.BooleanVar()
-duxaui_var.set(False)
-tk.Checkbutton(ui_checkboxes_frame, text="DuxaUI", variable=duxaui_var).pack(anchor=tk.W)
+    nillipuss_1080p_var = tk.BooleanVar()
+    tk.Checkbutton(ui_checkboxes_frame, text="Nillipuss UI 1080p", 
+                   variable=nillipuss_1080p_var).pack(anchor=tk.W)
 
-qqui_var = tk.BooleanVar()
-qqui_var.set(False)
-tk.Checkbutton(ui_checkboxes_frame, text="qqui (Calmethar Edition) [WinRar/Unrar Required]", variable=qqui_var).pack(anchor=tk.W)
+    nillipuss_1440p_var = tk.BooleanVar()
+    tk.Checkbutton(ui_checkboxes_frame, text="Nillipuss UI 1440p", 
+                   variable=nillipuss_1440p_var).pack(anchor=tk.W)
 
-buttons_frame = tk.Frame(root)
-buttons_frame.pack(pady=5)
+    qrustle_1080p_var = tk.BooleanVar()
+    tk.Checkbutton(ui_checkboxes_frame, text="QRustle 1080p", 
+                   variable=qrustle_1080p_var).pack(anchor=tk.W)
 
-update_ui_button = tk.Button(buttons_frame, text="Update/Install Selected UI Files", command=install_ui_files)
-update_ui_button.pack(side=tk.LEFT, padx=5)
+    qrustle_1440p_var = tk.BooleanVar()
+    tk.Checkbutton(ui_checkboxes_frame, text="QRustle 1440p", 
+                   variable=qrustle_1440p_var).pack(anchor=tk.W)
 
-separator = tk.Frame(root, height=2, bd=1, relief=tk.SUNKEN, bg="lightgray")
-separator.pack(fill=tk.X, padx=10, pady=10)
+    duxaui_var = tk.BooleanVar()
+    tk.Checkbutton(ui_checkboxes_frame, text="DuxaUI", 
+                   variable=duxaui_var).pack(anchor=tk.W)
 
-# Buttons for "Optimize Settings" and "Advanced Configurator"
-tk.Label(root, text="Settings:", font=header_font).pack()
+    qqui_var = tk.BooleanVar()
+    tk.Checkbutton(ui_checkboxes_frame, text="qqui (Calmethar Edition) [WinRar/Unrar Required]", 
+                   variable=qqui_var).pack(anchor=tk.W)
 
-buttons_frame = tk.Frame(root)
-buttons_frame.pack(pady=5)
+    d3pda_var = tk.BooleanVar()
+    tk.Checkbutton(ui_checkboxes_frame, text="d3pda UI", 
+                   variable=d3pda_var).pack(anchor=tk.W)
 
-optimize_button = tk.Button(buttons_frame, text="Apply Suggested Settings", command=optimize_settings)
-optimize_button.pack(side=tk.LEFT, padx=5)
+    update_ui_button = tk.Button(root, text="Update/Install Selected UI Files", command=install_ui_files)
+    update_ui_button.pack(pady=5)
 
-advanced_config_button = tk.Button(buttons_frame, text="Advanced Configurator", command=open_advanced_configurator)
-advanced_config_button.pack(side=tk.LEFT, padx=5)
+    separator = tk.Frame(root, height=2, bd=1, relief=tk.SUNKEN, bg="lightgray")
+    separator.pack(fill=tk.X, padx=10, pady=10)
 
-separator = tk.Frame(root, height=2, bd=1, relief=tk.SUNKEN, bg="lightgray")
-separator.pack(fill=tk.X, padx=10, pady=10)
+    # Settings section
+    tk.Label(root, text="Settings:", font=header_font).pack()
+    settings_buttons_frame = tk.Frame(root)
+    settings_buttons_frame.pack(pady=5)
 
-# Buttons for "Play" section
-tk.Label(root, text="Play:", font=header_font).pack()
+    optimize_button = tk.Button(settings_buttons_frame, text="Apply Suggested Settings", 
+                              command=optimize_settings)
+    optimize_button.pack(side=tk.LEFT, padx=5)
 
-play_buttons_frame = tk.Frame(root)
-play_buttons_frame.pack(pady=5)
+    wasd_button = tk.Button(settings_buttons_frame, text="WASD+Shortcut Mods", 
+                           command=apply_wasd_shortcuts)
+    wasd_button.pack(side=tk.LEFT, padx=5)
 
-run_quarmtool_button = tk.Button(play_buttons_frame, text="Run QuarmTool", command=run_quarmtool)
-run_quarmtool_button.pack(side=tk.LEFT, padx=5)
+    advanced_config_button = tk.Button(settings_buttons_frame, text="Advanced Configurator", 
+                                     command=open_advanced_configurator)
+    advanced_config_button.pack(side=tk.LEFT, padx=5)
 
-run_project_quarm_button = tk.Button(play_buttons_frame, text="Run Project Quarm", command=run_project_quarm)
-run_project_quarm_button.pack(side=tk.LEFT, padx=5)
+    separator = tk.Frame(root, height=2, bd=1, relief=tk.SUNKEN, bg="lightgray")
+    separator.pack(fill=tk.X, padx=10, pady=10)
 
-tk.Label(height=1).pack()  # Spacer
+    # Play section
+    tk.Label(root, text="Play:", font=header_font).pack()
+    play_buttons_frame = tk.Frame(root)
+    play_buttons_frame.pack(pady=5)
 
-launch_all_button = tk.Button(play_buttons_frame, text="Launch All", command=launch_all, height=1, font=("bold"))
-launch_all_button.pack(side=tk.LEFT, padx=5)
-launch_all_button.pack(padx=5, pady=5)
+    run_quarmtool_button = tk.Button(play_buttons_frame, text="Run QuarmTool", 
+                                    command=run_quarmtool)
+    run_quarmtool_button.pack(side=tk.LEFT, padx=5)
 
-# Create a frame to hold the log widget and scrollbar
-log_frame = tk.Frame(root)
-log_frame.pack(fill=tk.BOTH, expand=True)
+    run_project_quarm_button = tk.Button(play_buttons_frame, text="Run Project Quarm", 
+                                       command=run_project_quarm)
+    run_project_quarm_button.pack(side=tk.LEFT, padx=5)
 
-# Create the log widget (Text) and scrollbar
-log_widget = tk.Text(log_frame, width=70, height=10, wrap=tk.WORD)
-log_scrollbar = tk.Scrollbar(log_frame, orient="vertical", command=log_widget.yview)
+    run_pqdi4all_button = tk.Button(play_buttons_frame, text="Run pqdi4all", 
+                                   command=run_pqdi4all)
+    run_pqdi4all_button.pack(side=tk.LEFT, padx=5)
 
-# Configure the log widget to use the scrollbar
-log_widget.configure(yscrollcommand=log_scrollbar.set)
+    launch_all_button = tk.Button(play_buttons_frame, text="Launch All", 
+                                 command=launch_all, height=1, font=("bold"))
+    launch_all_button.pack(side=tk.LEFT, padx=5)
 
-# Pack the log widget and scrollbar
-log_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    # Log frame
+    log_frame = tk.Frame(root)
+    log_frame.pack(fill=tk.BOTH, expand=True)
 
-# Configure tags for colored text (if you're using them)
-log_widget.tag_configure("red", foreground="red")
-log_widget.tag_configure("green", foreground="green")
-log_widget.tag_configure("black", foreground="black")
+    log_widget = tk.Text(log_frame, width=70, height=10, wrap=tk.WORD)
+    log_scrollbar = tk.Scrollbar(log_frame, orient="vertical", command=log_widget.yview)
 
-# Save settings when directories are changed
-zeal_dir_entry.bind("<FocusOut>", lambda e: save_current_settings())
-quarmtool_dir_entry.bind("<FocusOut>", lambda e: save_current_settings())
+    log_widget.configure(yscrollcommand=log_scrollbar.set)
+    log_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-# Check for updates when the app starts
-check_for_updates("iamclint/Zeal", zeal_version_var.get(), zeal_notice)
-check_for_updates("EJWellman/QuarmTool", quarmtool_version_var.get(), quarmtool_notice)
+    log_widget.tag_configure("red", foreground="red")
+    log_widget.tag_configure("green", foreground="green")
+    log_widget.tag_configure("black", foreground="black")
 
-# Run the main loop
-root.mainloop()
+    # Bind settings save events
+    zeal_dir_entry.bind("<FocusOut>", lambda e: save_current_settings())
+    quarmtool_dir_entry.bind("<FocusOut>", lambda e: save_current_settings())
+
+    # Check for updates when the app starts
+    check_for_updates("iamclint/Zeal", zeal_version_var.get(), zeal_notice)
+    check_for_updates("EJWellman/QuarmTool", quarmtool_version_var.get(), quarmtool_notice)
+
+    # Run the main loop
+    root.mainloop()
