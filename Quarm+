@@ -466,54 +466,6 @@ def apply_wasd_shortcuts():
         log_message(f"Error applying WASD shortcuts: {str(e)}", "red")
         messagebox.showerror("Error", f"Failed to apply WASD shortcuts: {str(e)}")
 
-def update_pqdi4all():
-    quarmtool_dir = quarmtool_dir_entry.get()
-    if not quarmtool_dir:
-        messagebox.showerror("Error", "Please select your QuarmTool directory first.")
-        return
-
-    log_message("Starting update process for pqdi4all...", "black")
-    try:
-        api_url = "https://api.github.com/repos/blastlaster/pqdi4all/releases/latest"
-        response = requests.get(api_url)
-        if response.status_code == 200:
-            latest_release = response.json()
-            download_url = latest_release['assets'][0]['browser_download_url']
-            version = latest_release['tag_name']
-            
-            download_path = os.path.join(quarmtool_dir, "pqdi4all.exe")
-            
-            response = requests.get(download_url, stream=True)
-            with open(download_path, 'wb') as f:
-                shutil.copyfileobj(response.raw, f)
-                
-            log_message(f"Successfully installed pqdi4all version {version}", "green")
-            return True
-        else:
-            log_message("Failed to fetch pqdi4all release information", "red")
-            return False
-    except Exception as e:
-        log_message(f"Error updating pqdi4all: {str(e)}", "red")
-        return False
-
-def run_pqdi4all():
-    quarmtool_dir = quarmtool_dir_entry.get()
-    if not quarmtool_dir:
-        messagebox.showerror("Error", "QuarmTool directory is not set. Please set the directory before running pqdi4all.")
-        return
-    
-    pqdi4all_path = os.path.join(quarmtool_dir, "pqdi4all.exe")
-    if not os.path.exists(pqdi4all_path):
-        messagebox.showerror("Error", "pqdi4all.exe not found in the specified directory.")
-        return
-    
-    try:
-        subprocess.Popen(pqdi4all_path, cwd=quarmtool_dir)
-        log_message("Started pqdi4all", "green")
-    except Exception as e:
-        log_message(f"Error running pqdi4all: {str(e)}", "red")
-        messagebox.showerror("Error", f"Failed to run pqdi4all: {str(e)}")
-
 def open_advanced_configurator():
     if not zeal_dir_entry.get():
         messagebox.showerror("Error", "Please select your Zeal directory first.")
@@ -811,25 +763,16 @@ def update_quarmtool():
     if not quarmtool_updated:
         log_message("QuarmTool is already up to date.", "green")
 
-def update_all(include_pqdi4all=True):
+def update_all():
     """
-    Updates all selected components.
-    
-    Args:
-        include_pqdi4all (bool): Whether to include pqdi4all in the update
+    Updates Zeal and QuarmTool components.
     """
     log_message("Starting update process for all components...", "black")
     
-    # Always update Zeal and QuarmTool
     update_zeal()
     update_quarmtool()
     
-    # Update pqdi4all only if specified
-    if include_pqdi4all:
-        update_pqdi4all()
-        log_message("Completed updating Zeal, QuarmTool, and pqdi4all", "green")
-    else:
-        log_message("Completed updating Zeal and QuarmTool", "green")
+    log_message("Completed updating Zeal and QuarmTool", "green")
 
 def run_quarmtool():
     quarmtool_dir = quarmtool_dir_entry.get()
@@ -848,6 +791,56 @@ def run_quarmtool():
     except Exception as e:
         messagebox.showerror("Error", f"Failed to run QuarmTool: {str(e)}")
         log_message(f"Error running QuarmTool: {str(e)}", "red")
+
+def install_quarm_patcher():
+    zeal_dir = zeal_dir_entry.get()
+    if not zeal_dir:
+        messagebox.showerror("Error", "Please select your Project Quarm directory first.")
+        return
+
+    try:
+        # Download URL for the Quarm Patcher zip file
+        download_url = "https://drive.google.com/uc?id=1IGVKZ3l9tdP3SvXLYhwLuHxRToqU8msF"
+        download_path = os.path.join(zeal_dir, "quarm_patcher.zip")
+
+        log_message("Downloading Quarm Patcher...", "black")
+        
+        # Download the file
+        response = requests.get(download_url)
+        with open(download_path, 'wb') as f:
+            f.write(response.content)
+
+        # Extract the contents to the Zeal directory
+        with zipfile.ZipFile(download_path, 'r') as zip_ref:
+            zip_ref.extractall(zeal_dir)
+
+        # Clean up the zip file
+        os.remove(download_path)
+        
+        log_message("Successfully installed Quarm Patcher", "green")
+        messagebox.showinfo("Success", "Quarm Patcher has been installed successfully!")
+        
+    except Exception as e:
+        log_message(f"Error installing Quarm Patcher: {str(e)}", "red")
+        messagebox.showerror("Error", f"Failed to install Quarm Patcher: {str(e)}")
+
+def run_quarm_patcher():
+    zeal_dir = zeal_dir_entry.get()
+    if not zeal_dir:
+        messagebox.showerror("Error", "Zeal directory is not set. Please set the directory before running Quarm Patcher.")
+        return
+    
+    patcher_path = os.path.join(zeal_dir, "eqemupatcher.exe")
+    if not os.path.exists(patcher_path):
+        messagebox.showerror("Error", "eqemupatcher.exe not found. Please install Quarm Patcher first.")
+        return
+    
+    try:
+        subprocess.Popen(patcher_path, cwd=zeal_dir)
+        log_message("Started Quarm Patcher", "green")
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to run Quarm Patcher: {str(e)}")
+        log_message(f"Error running Quarm Patcher: {str(e)}", "red")
 
 def run_project_quarm():
     zeal_dir = zeal_dir_entry.get()
@@ -871,39 +864,30 @@ def run_project_quarm():
 def is_process_running(process_name):
     """
     Check if a process with the given name is running from the correct directory.
-    
-    Args:
-        process_name (str): Name of the process to check (e.g., 'eqgame.exe')
-    
-    Returns:
-        bool: True if process is running from correct directory, False otherwise
+    Now allows up to 2 instances of Project Quarm.
     """
     try:
-        # Normalize the Zeal directory path
         zeal_dir = os.path.normpath(zeal_dir_entry.get()).lower()
+        count = 0
         
         for proc in psutil.process_iter(['name']):
             try:
-                # Check if process name matches
                 if proc.info['name'].lower() == process_name.lower():
                     try:
                         process = psutil.Process(proc.pid)
                         
-                        # For Project Quarm, verify it's running from the correct directory
                         if process_name.lower() == 'eqgame.exe':
                             try:
-                                # Get the full path of the running process and normalize it
                                 proc_path = os.path.normpath(process.exe()).lower()
                                 expected_path = os.path.normpath(os.path.join(zeal_dir, 'eqgame.exe')).lower()
                                 
-                                # Compare the full paths
                                 if proc_path == expected_path:
-                                    log_message(f"Found existing eqgame.exe at {proc_path}", "black")
-                                    return True
+                                    count += 1
+                                    if count >= 2:  # Allow up to 2 instances
+                                        return True
                             except (psutil.NoSuchProcess, psutil.AccessDenied):
                                 continue
                         else:
-                            # For other applications, just check if they're running
                             return True
                             
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -916,63 +900,6 @@ def is_process_running(process_name):
         log_message(f"Error checking if process {process_name} is running: {str(e)}", "red")
         
     return False
-
-def launch_all():
-    """
-    Launches applications only if they're not already running.
-    For Project Quarm, only launches if it's not already running from the correct Zeal directory.
-    """
-    log_message("Checking and launching applications...", "black")
-    success_count = 0
-    total_count = 0
-    
-    # Define applications with their process names
-    applications = [
-        {
-            "name": "Project Quarm",  # Launch Project Quarm first
-            "process": "eqgame.exe",
-            "run": run_project_quarm
-        },
-        {
-            "name": "QuarmTool",
-            "process": "QuarmTool.exe",
-            "run": run_quarmtool
-        },
-        {
-            "name": "pqdi4all",
-            "process": "pqdi4all.exe",
-            "run": run_pqdi4all
-        }
-    ]
-    
-    for app in applications:
-        try:
-            total_count += 1
-            
-            # Check if process is running
-            if is_process_running(app["process"]):
-                log_message(f"{app['name']} is already running", "black")
-                success_count += 1
-                continue
-                
-            log_message(f"Launching {app['name']}...", "black")
-            app["run"]()
-            
-            # Add longer delay after launching Project Quarm
-            if app["name"] == "Project Quarm":
-                time.sleep(2)
-            else:
-                time.sleep(1)
-                
-            success_count += 1
-            
-        except Exception as e:
-            log_message(f"Failed to run {app['name']}: {str(e)}", "red")
-    
-    if success_count > 0:
-        log_message(f"Successfully handled {success_count} of {total_count} applications", "green")
-    else:
-        log_message(f"Failed to handle any applications", "red")
 
 def optimize_settings():
     zeal_dir = zeal_dir_entry.get()
@@ -1033,7 +960,7 @@ def optimize_settings():
 # Create the main window
 if __name__ == "__main__":
     root = tk.Tk()
-    root.title("Quarm+ v8.3")
+    root.title("Quarm+ v8.4")
     root.geometry("500x900")
 
     # Load saved settings
@@ -1098,19 +1025,15 @@ if __name__ == "__main__":
     update_quarmtool_button = tk.Button(top_buttons_frame, text="Update/Install QuarmTool", command=update_quarmtool)
     update_quarmtool_button.pack(side=tk.LEFT, padx=5)
 
-    update_pqdi4all_button = tk.Button(top_buttons_frame, text="Update/Install pqdi4all", command=update_pqdi4all)
-    update_pqdi4all_button.pack(side=tk.LEFT, padx=5)
+    install_patcher_button = tk.Button(top_buttons_frame, text="Install Quarm Patcher", command=install_quarm_patcher)
+    install_patcher_button.pack(side=tk.LEFT, padx=5)
 
     # Create all buttons frame
     all_buttons_frame = tk.Frame(root)
     all_buttons_frame.pack(pady=5)
 
-    update_zeal_qt_button = tk.Button(all_buttons_frame, text="Update/Install Zeal and QT", 
-                                     command=lambda: update_all(False), height=1, font=("bold"))
-    update_zeal_qt_button.pack(side=tk.LEFT, padx=5)
-
-    update_all_button = tk.Button(all_buttons_frame, text="Update/Install All", 
-                                 command=lambda: update_all(True), height=1, font=("bold"))
+    update_all_button = tk.Button(all_buttons_frame, text="Update/Install Zeal+QT", 
+                                 command=update_all, height=1, font=("bold"))
     update_all_button.pack(side=tk.LEFT, padx=5)
 
     separator = tk.Frame(root, height=2, bd=1, relief=tk.SUNKEN, bg="lightgray")
@@ -1188,13 +1111,9 @@ if __name__ == "__main__":
                                        command=run_project_quarm)
     run_project_quarm_button.pack(side=tk.LEFT, padx=5)
 
-    run_pqdi4all_button = tk.Button(play_buttons_frame, text="Run pqdi4all", 
-                                   command=run_pqdi4all)
-    run_pqdi4all_button.pack(side=tk.LEFT, padx=5)
-
-    launch_all_button = tk.Button(play_buttons_frame, text="Launch All", 
-                                 command=launch_all, height=1, font=("bold"))
-    launch_all_button.pack(side=tk.LEFT, padx=5)
+    run_patcher_button = tk.Button(play_buttons_frame, text="Run Quarm Patcher", 
+                                  command=run_quarm_patcher)
+    run_patcher_button.pack(side=tk.LEFT, padx=5)
 
     # Log frame
     log_frame = tk.Frame(root)
