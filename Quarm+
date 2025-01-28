@@ -563,39 +563,125 @@ def save_current_settings():
     save_settings(settings)
 
 def download_with_retry(url, path, max_retries=3):
+    """Safer implementation of file downloads with additional checks."""
     for attempt in range(max_retries):
         try:
-            log_message(f"Downloading from {url} (Attempt {attempt + 1}/{max_retries})", "black")
-            response = requests.get(url, stream=True)
-            response.raise_for_status()
-            
-            total_size = int(response.headers.get('content-length', 0))
-            block_size = 8192
-            downloaded_size = 0
-            
-            with open(path, 'wb') as file:
-                for chunk in response.iter_content(chunk_size=block_size):
-                    if chunk:
-                        file.write(chunk)
-                        downloaded_size += len(chunk)
-                        
-                        if total_size > 0:
-                            progress = (downloaded_size / total_size) * 100
-                            log_message(f"Download progress: {progress:.2f}%", "black")
-            
-            log_message(f"Successfully downloaded to {path}", "green")
-            return True
-        
-        except requests.exceptions.RequestException as e:
-            log_message(f"Download attempt {attempt + 1} failed: {str(e)}", "red")
+            # Use session for better control
+            with requests.Session() as session:
+                # Set user agent and timeout
+                headers = {
+                    'User-Agent': 'Quarm-Updater/8.4',
+                    'Accept': 'application/octet-stream'
+                }
+                
+                # Stream the download with progress tracking
+                response = session.get(url, headers=headers, stream=True, timeout=30)
+                response.raise_for_status()
+                
+                total_size = int(response.headers.get('content-length', 0))
+                
+                # Create temporary file first
+                temp_path = path + '.tmp'
+                with open(temp_path, 'wb') as file:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            file.write(chunk)
+                
+                # Only if download completed successfully, move to final location
+                shutil.move(temp_path, path)
+                return True
+                
+        except (requests.exceptions.RequestException, IOError) as e:
             if attempt == max_retries - 1:
-                log_message(f"Max retries reached. Download failed.", "red")
+                log_message(f"Download failed after {max_retries} attempts: {str(e)}", "red")
                 return False
             
-            wait_time = 2 ** attempt
-            log_message(f"Retrying in {wait_time} seconds...", "black")
+            wait_time = min(2 ** attempt, 10)  # Cap maximum wait time
             time.sleep(wait_time)
     
+    return False
+
+def run_external_program(program_path, working_dir=None):
+    """Safer implementation of external program execution."""
+    if not os.path.isfile(program_path):
+        raise FileNotFoundError(f"Program not found: {program_path}")
+        
+    try:
+        # Use subprocess.Popen with limited privileges
+        startupinfo = None
+        if sys.platform == "win32":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        
+        process = subprocess.Popen(
+            program_path,
+            cwd=working_dir or os.path.dirname(program_path),
+            startupinfo=startupinfo,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        )
+        
+        return process.pid
+        
+    except Exception as e:
+        log_message(f"Error launching program: {str(e)}", "red")
+        raise
+
+def modify_config_file(config_path, settings):
+    """Safer implementation of configuration file modification."""
+    if not os.path.isfile(config_path):
+        return False
+        
+    try:
+        # Create backup
+        backup_path = config_path + '.bak'
+        shutil.copy2(config_path, backup_path)
+        
+        config = configparser.ConfigParser()
+        config.optionxform = str  # Preserve case
+        
+        # Read existing config
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config.read_file(f)
+        
+        # Apply changes
+        modified = False
+        for section, options in settings.items():
+            if not config.has_section(section):
+                config.add_section(section)
+            for key, value in options.items():
+                if not config.has_option(section, key) or config.get(section, key) != value:
+                    config.set(section, key, value)
+                    modified = True
+        
+        # Only write if changes were made
+        if modified:
+            with open(config_path, 'w', encoding='utf-8') as f:
+                config.write(f)
+            
+            # Remove backup if successful
+            os.remove(backup_path)
+            
+        return True
+        
+    except Exception as e:
+        # Restore from backup if something went wrong
+        if os.path.exists(backup_path):
+            shutil.copy2(backup_path, config_path)
+        raise
+
+def check_running_process(process_name, process_path):
+    """Safer implementation of process checking."""
+    try:
+        for proc in psutil.process_iter(['name', 'exe']):
+            try:
+                # Only check exact process name and path
+                if (proc.info['name'].lower() == process_name.lower() and 
+                    proc.info['exe'].lower() == process_path.lower()):
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except Exception:
+        pass
     return False
 
 def install_ui_files():
