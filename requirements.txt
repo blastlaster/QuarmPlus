@@ -1,3 +1,6 @@
+tkinter
 requests
-packaging
-schedule
+json
+os
+shutil
+logging
