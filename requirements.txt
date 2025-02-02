@@ -1,6 +1,6 @@
-tkinter
-requests
-json
-os
-shutil
-logging
+requests==2.31.0
+packaging==23.2
+psutil==5.9.6
+pyperclip==1.8.2
+pytz==2023.3
+py7zr==0.20.5
