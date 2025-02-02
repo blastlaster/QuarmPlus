@@ -11,12 +11,211 @@ import traceback
 import psutil
 import time
 import logging
+import pyperclip
 import tkinter as tk
 from tkinter import ttk, colorchooser, messagebox, filedialog
 import subprocess
 from packaging import version
 
 settings_file = "settings.json"
+APP_VERSION = "v0.1.9"
+
+class LoadingScreen(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent  # Store reference to parent
+        self.title("Loading, please wait...")
+        
+        # Configure window
+        self.configure(bg="black")
+        if sys.platform == "win32":
+            self.attributes("-toolwindow", True)
+        
+        # Ensure window is on top and grabs focus
+        self.lift()
+        self.focus_force()
+        
+        # Create main container with padding
+        main_frame = tk.Frame(self, bg="black", padx=20, pady=15)
+        main_frame.pack(expand=True, fill="both")
+        
+        # ASCII Art
+        ascii_art = '''                                                          
+                         $$$$$&&&&&&                        
+                       $$$X:::xxx$&&&                       
+               $$$$$.......:::xxxxxxxxxxx&&&&               
+          $$$$$.....:::;&&&&&&&&&&&&&xxxxxxxx&&&&&          
+     $$$$$......:;&&&&&&xXXXXX$$$$$$$&&&&Xxxxxxxxx&&&&&     
+     $$....:&&&&&&$X;;XXxxxxxxxxxxXX$$$$$&&&&&&&$xxxx&&     
+     $$.:::;&&&xxxxxxxxxXXXXXXXXXxxxxXXXX$$$$&&&$xxxx&&     
+     $$.:X&&$$$....;xXXXX$$$$$$&&&&XxxxxXXXXX&&&&&&xx&&     
+     $$::X&&xXx..XXXXx$$........:;;&&XXxxxxxX$$$&&&xx&&     
+     $$::X&&xxxXXxXX$$....:;;;.....;;&&XXxxxx$$$&&&xx&&     
+     $$::X&&xxX..x$$....;;x&&&&&:....xx&&&XXx$$$&&&xx&&     
+     $$::X&&xxXxxX$$..:;&&&&&&&&&&X..xx&&&$xX$$$&&&xx&&     
+     $$::X&&xxxXXX$$..;;&&&xxxXX&&X..xx&&&$XX$$$&&&xx&&     
+     $$::X&&xxxxXX$$..;;&&&xXxxx&&X..xx&&&$Xx$$$&&&xx&&     
+     $$::X&&xxXxxX$$..;;&&&xxXxx&&X..xx&&&$Xx$$$&&&xx&&     
+     $$::X&&xxxXXX$$..;;&&&XxxXx&&X..xx&&&$Xx$$$&&&xx&&     
+     $$::X&&XXXxxX$$..;;&&&xx$$$$&X..xx&&&$XX$$$&&&xx&&     
+     $$::;x&&$XxXX$$..:;&&&x$$xxxx;::xx&&&$XX$&&&&$xx&&     
+       &:::&XxxXX$$$...;&&&X&$.....xx$$&&&$$$$$$&&xx&       
+        &&:;&&&xx$&$::..&$$&&&:::....&&&&&$$$&&&$x&&        
+         &:;&&&xxXX$&&....:$$$&&;....;;$&&$x$$$$$&$&        
+         &::;$&&XxxX&&;;......;;xXx....;;$$$$$$$X&&&        
+          &&:;;&&xxxx$&&:;;xxxxxxxXXx.;xX$$X.$$$$$$&&       
+          &&XX::&&&XxXx$&&&&&&&&&&&&&;;X;.$$$$...$$$&&&     
+             &&:;&&&xxxXXXXXXX$$$$$$$&&$;.$$xx...XX$&&&     
+               &xx;x&&&&xxXXXx$$$$$$$&&$:.$X.......$&&&&&   
+               &&&;;;;;&&&&xXX$$&&&&&&&$$$$$$$...&&&&&&     
+                  &&;;;;;;x&&&&&&&xxxxX&&&$$$$$$$&&&&&&     
+                    &&&;;;;XXX$$$$xx&&& $&&&&&&&&&&&&       
+                       &&&;;;;xxx$&&&       &&&&&&&         
+                       &&&&&&&&&&&&&&                       
+
+                  You're in our world now.
+                                                            '''
+        
+        # ASCII Art Label with fixed width font
+        art_label = tk.Label(main_frame, text=ascii_art, 
+                            font=('Courier New', 8), 
+                            fg="lightgray", 
+                            bg="black", 
+                            justify=tk.LEFT)
+        art_label.pack(pady=(0, 20))
+        
+        # Status Label
+        self.status_label = tk.Label(main_frame, 
+                                   text="Checking for updates...", 
+                                   fg="white", 
+                                   bg="black", 
+                                   font=("Segoe UI", 10))
+        self.status_label.pack(pady=(0, 0))
+        
+        # Progress Bar
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(main_frame, 
+                                          variable=self.progress_var, 
+                                          maximum=100, 
+                                          length=400)
+        self.progress_bar.pack(pady=(0, 10))
+        
+        # Create button frame for side-by-side buttons
+        self.button_frame = tk.Frame(main_frame, bg="black")
+        
+        # Update Button (hidden by default)
+        self.update_button = tk.Button(self.button_frame, 
+                                     text="Copy Update Link",
+                                     command=self.copy_update_and_exit,
+                                     font=("Segoe UI", 10),
+                                     fg="white",
+                                     bg="#0078D4",
+                                     activebackground="#106EBE",
+                                     activeforeground="white")
+
+        # Skip Button (hidden by default)
+        self.skip_button = tk.Button(self.button_frame,
+                                   text="Continue to Quarm+",
+                                   command=self.close_and_continue,
+                                   font=("Segoe UI", 10),
+                                   fg="white",
+                                   bg="#5a5a5a",
+                                   activebackground="#404040",
+                                   activeforeground="white")
+        
+        # Center window
+        self.geometry("450x650")
+        self.update_idletasks()
+        width = self.winfo_width()
+        height = self.winfo_height()
+        x = (self.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.winfo_screenheight() // 2) - (height // 2)
+        self.geometry(f'+{x}+{y}')
+        
+        # Make window non-resizable after centering
+        self.resizable(False, False)
+        
+        # Start version check after a short delay
+        self.after(500, self.check_version)
+
+    def copy_update_and_exit(self):
+        """Copy update link to clipboard and exit application"""
+        try:
+            # Use both clipboard methods for better reliability
+            self.clipboard_clear()
+            self.clipboard_append("https://github.com/blastlaster/QuarmPlus/releases/latest")
+            self.update()  # Force update the clipboard
+            
+            # Use system clipboard as backup
+            import pyperclip
+            pyperclip.copy("https://github.com/blastlaster/QuarmPlus/releases/latest")
+            
+            # Show message
+            messagebox.showinfo("Update Link Copied", 
+                              "The update link has been copied to your clipboard. Replace Quarm.exe with the new version.")
+            
+        except Exception as e:
+            log_message(f"Error copying update link: {str(e)}", "red")
+            # Still try to copy using alternative method
+            try:
+                import pyperclip
+                pyperclip.copy("https://github.com/blastlaster/QuarmPlus/releases/latest")
+            except:
+                pass
+    
+    def check_version(self):
+        """Check for new version of Quarm+"""
+        try:
+            self.progress_var.set(20)
+            self.status_label.config(text="Checking latest version...")
+            log_message(f"Current version: {APP_VERSION}", "black")
+            
+            # Get latest version from GitHub
+            log_message("Fetching latest version from GitHub...", "black")
+            response = requests.get("https://api.github.com/repos/blastlaster/QuarmPlus/releases/latest")
+            self.progress_var.set(60)
+            
+            if response.status_code == 200:
+                latest_version = response.json()['tag_name']
+                log_message(f"Latest version from GitHub: {latest_version}", "black")
+                
+                self.progress_var.set(80)
+                self.status_label.config(text="Comparing versions...")
+                
+                # Clean version strings for comparison
+                latest_ver = latest_version.lstrip('v').strip()
+                current_ver = APP_VERSION.lstrip('v').strip()
+                log_message(f"Comparing versions - Current: {current_ver}, Latest: {latest_ver}", "black")
+                
+                try:
+                    if version.parse(latest_ver) > version.parse(current_ver):
+                        log_message("New version available!", "green")
+                        self.status_label.config(text=f"New version available: {latest_version}")
+                        # Show both buttons side by side
+                        self.button_frame.pack(pady=10)
+                        self.update_button.pack(side=tk.LEFT, padx=5)
+                        self.skip_button.pack(side=tk.LEFT, padx=5)
+                    else:
+                        log_message("Application is up to date", "green")
+                        self.after(500, self.close_and_continue)
+                except version.InvalidVersion:
+                    log_message("Error parsing version numbers", "red")
+                    self.after(500, self.close_and_continue)
+                
+                self.progress_var.set(100)
+            else:
+                log_message(f"Failed to check version. Status code: {response.status_code}", "red")
+                self.progress_var.set(100)
+                self.after(500, self.close_and_continue)
+                
+        except Exception as e:
+            log_message(f"Error checking for updates: {str(e)}", "red")
+            self.progress_var.set(100)
+            self.after(500, self.close_and_continue)
+    
+    def close_and_continue(self):
+        """Close loading screen and continue with main application"""
+        self.destroy()
 
 def preserve_custom_tga_files(zeal_dir):
     """Preserves custom TGA files from the targetrings folder during Zeal updates."""
@@ -220,10 +419,6 @@ class AdvancedConfiguratorWindow(tk.Toplevel):
             'MaxBGFPS': 'int',
             'MaxMouseLookFPS': 'int',
             'NoFPSLimiter': 'bool',
-            'ChatTimestamps': 'dropdown',
-            'Bluecon': 'bool',
-            'ZealInput': 'bool',
-            'FloatingDamage': 'bool',
             'UseUmbra': 'dropdown'
         }
         self.chat_timestamp_options = {
@@ -478,17 +673,82 @@ def open_advanced_configurator():
         messagebox.showerror("Error", f"Failed to open Advanced Configurator: {str(e)}")
 
 def load_settings():
+    """Load settings from JSON file, including window position"""
     if os.path.exists(settings_file):
         with open(settings_file, 'r') as f:
             settings = json.load(f)
             if "show_welcome" not in settings:
                 settings["show_welcome"] = True
+            if "window_position" not in settings:
+                settings["window_position"] = {
+                    "x": None,
+                    "y": None
+                }
             return settings
-    return {"show_welcome": True}
+    return {
+        "show_welcome": True,
+        "window_position": {
+            "x": None,
+            "y": None
+        }
+    }
 
 def save_settings(settings):
+    """Save settings to JSON file"""
     with open(settings_file, 'w') as f:
         json.dump(settings, f)
+
+def save_window_position(root):
+    """Save the current window position"""
+    try:
+        settings = load_settings()
+        settings["window_position"] = {
+            "x": root.winfo_x(),
+            "y": root.winfo_y()
+        }
+        save_settings(settings)
+    except Exception as e:
+        print(f"Error saving window position: {str(e)}")
+
+def restore_window_position(root, settings):
+    """Restore the window position from settings"""
+    try:
+        if "window_position" in settings:
+            x = settings["window_position"].get("x")
+            y = settings["window_position"].get("y")
+            
+            if x is not None and y is not None:
+                # Ensure the window will be visible on the screen
+                screen_width = root.winfo_screenwidth()
+                screen_height = root.winfo_screenheight()
+                
+                # Get window size
+                root.update_idletasks()
+                window_width = root.winfo_width()
+                window_height = root.winfo_height()
+                
+                # Adjust position if window would be off screen
+                x = max(0, min(x, screen_width - window_width))
+                y = max(0, min(y, screen_height - window_height))
+                
+                root.geometry(f"+{x}+{y}")
+            else:
+                # Center the window if no position is saved
+                center_window(root)
+        else:
+            center_window(root)
+    except Exception as e:
+        print(f"Error restoring window position: {str(e)}")
+        center_window(root)
+
+def center_window(root):
+    """Center the window on the screen"""
+    root.update_idletasks()
+    width = root.winfo_width()
+    height = root.winfo_height()
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = (root.winfo_screenheight() // 2) - (height // 2)
+    root.geometry(f"+{x}+{y}")
 
 def fetch_versions(github_repo):
     api_url = f"https://api.github.com/repos/{github_repo}/releases"
@@ -599,43 +859,49 @@ def download_with_retry(url, path, max_retries=3):
 
 def install_ui_files():
     zeal_dir = zeal_dir_entry.get()
-    ui_files_to_install = []
-    
     if zeal_dir == "":
         messagebox.showerror("Error", "Please enter an EQ directory to install UI Files.")
         return
 
     status_window = UIInstallationStatus(root)
 
-    ui_files = [
-        {"name": "Nillipuss UI 1080p", "url": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest", "var": nillipuss_1080p_var},
-        {"name": "Nillipuss UI 1440p", "url": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest", "var": nillipuss_1440p_var},
-        {"name": "QRustle 1080p", "url": "https://github.com/user-attachments/files/17566105/Qrustle1080-Z5x.zip", "var": qrustle_1080p_var},
-        {"name": "QRustle 1440p", "url": "https://github.com/user-attachments/files/17566110/Qrustle1440-Z5x.zip", "var": qrustle_1440p_var},
-        {"name": "DuxaUI", "url": "https://github.com/LordDemonos/Quarm.Guide/blob/master/assets/duxaUI.7z?raw=true", "var": duxaui_var},
-        {"name": "qqui (Calmethar Edition)", "url": "https://drive.google.com/uc?id=13aisHiN9kOkFJHywZnGUF0EfUOiq-jwx", "var": qqui_var},
-        {"name": "d3pda UI", "url": "https://api.github.com/repos/defaultex/d3pda-quarm/releases/latest", "var": d3pda_var}
-    ]
+    def background_ui_install():
+        ui_files_to_install = []
+        
+        ui_files = [
+            {"name": "Nillipuss UI 1080p", "url": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest", "var": nillipuss_1080p_var},
+            {"name": "Nillipuss UI 1440p", "url": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest", "var": nillipuss_1440p_var},
+            {"name": "QRustle 1080p", "url": "https://github.com/user-attachments/files/17566105/Qrustle1080-Z5x.zip", "var": qrustle_1080p_var},
+            {"name": "QRustle 1440p", "url": "https://github.com/user-attachments/files/17566110/Qrustle1440-Z5x.zip", "var": qrustle_1440p_var},
+            {"name": "DuxaUI", "url": "https://github.com/LordDemonos/Quarm.Guide/blob/master/assets/duxaUI.7z?raw=true", "var": duxaui_var},
+            {"name": "qqui (Calmethar Edition)", "url": "https://drive.google.com/uc?id=13aisHiN9kOkFJHywZnGUF0EfUOiq-jwx", "var": qqui_var},
+            {"name": "d3pda UI", "url": "https://api.github.com/repos/defaultex/d3pda-quarm/releases/latest", "var": d3pda_var}
+        ]
 
-    total_files = sum(1 for ui_file in ui_files if ui_file["var"].get())
-    files_processed = 0
+        total_files = sum(1 for ui_file in ui_files if ui_file["var"].get())
+        files_processed = 0
 
-    for ui_file in ui_files:
-        if ui_file["var"].get():
-            try:
-                status_window.update_status(f"Processing {ui_file['name']}...")
+        for ui_file in ui_files:
+            if ui_file["var"].get():
+                try:
+                    root.after(0, lambda msg=f"Processing {ui_file['name']}...": 
+                        status_window.update_status(msg))
 
-                if ui_file["name"] == "qqui (Calmethar Edition)":
-                    download_url = ui_file["url"]
-                    file_extension = ".zip"
-                elif ui_file["name"] == "DuxaUI":
-                    download_url = ui_file["url"]
-                    file_extension = ".7z"
-                elif ui_file["name"].startswith("QRustle"):
-                    download_url = ui_file["url"]
-                    file_extension = ".zip"
-                else:
-                    try:
+                    # Use download_with_retry for robust downloading
+                    download_path = os.path.join(zeal_dir, "uifiles")
+                    os.makedirs(download_path, exist_ok=True)
+                    
+                    # Determine download URL and file extension
+                    if ui_file["name"] == "qqui (Calmethar Edition)":
+                        download_url = ui_file["url"]
+                        file_extension = ".zip"
+                    elif ui_file["name"] == "DuxaUI":
+                        download_url = ui_file["url"]
+                        file_extension = ".7z"
+                    elif ui_file["name"].startswith("QRustle"):
+                        download_url = ui_file["url"]
+                        file_extension = ".zip"
+                    else:
                         response = requests.get(ui_file["url"])
                         response.raise_for_status()
                         release_data = response.json()
@@ -644,49 +910,46 @@ def install_ui_files():
                         else:
                             raise ValueError(f"No assets found for {ui_file['name']}")
                         file_extension = ".zip"
-                    except Exception as e:
-                        log_message(f"Error fetching release info for {ui_file['name']}: {str(e)}", "red")
-                        continue
 
-                download_path = os.path.join(zeal_dir, "uifiles")
-                os.makedirs(download_path, exist_ok=True)
-                download_path = os.path.join(download_path, f"{ui_file['name']}{file_extension}")
+                    download_path = os.path.join(download_path, f"{ui_file['name']}{file_extension}")
 
-                log_message(f"Downloading {ui_file['name']} from {download_url}", "black")
-                r = requests.get(download_url, stream=True)
-                r.raise_for_status()
-                
-                with open(download_path, 'wb') as f:
-                    shutil.copyfileobj(r.raw, f)
+                    # Download the file
+                    if download_with_retry(download_url, download_path):
+                        # Extract based on file type
+                        if file_extension == ".7z":
+                            with py7zr.SevenZipFile(download_path, mode='r') as z:
+                                z.extractall(os.path.join(zeal_dir, "uifiles"))
+                        else:
+                            with zipfile.ZipFile(download_path, 'r') as zip_ref:
+                                zip_ref.extractall(os.path.join(zeal_dir, "uifiles"))
 
-                if file_extension == ".7z":
-                    with py7zr.SevenZipFile(download_path, mode='r') as z:
-                        z.extractall(os.path.join(zeal_dir, "uifiles"))
-                else:
-                    with zipfile.ZipFile(download_path, 'r') as zip_ref:
-                        zip_ref.extractall(os.path.join(zeal_dir, "uifiles"))
+                        os.remove(download_path)
+                        ui_files_to_install.append(ui_file['name'])
 
-                os.remove(download_path)
-                ui_files_to_install.append(ui_file['name'])
-                log_message(f"Installed {ui_file['name']} UI files to {zeal_dir}/uifiles", "green")
+                    files_processed += 1
+                    root.after(0, lambda progress=(files_processed / total_files) * 100: 
+                        status_window.update_progress(progress))
 
-                files_processed += 1
-                status_window.update_progress((files_processed / total_files) * 100)
+                except Exception as e:
+                    log_message(f"Error installing {ui_file['name']} UI files: {str(e)}", "red")
+                    continue
 
-            except Exception as e:
-                log_message(f"Error installing {ui_file['name']} UI files: {str(e)}", "red")
-                continue
+        # Final steps
+        delete_equi_options_window(zeal_dir)
 
-    delete_equi_options_window(zeal_dir)
+        # Show results in main thread
+        root.after(0, lambda: [
+            (messagebox.showinfo("Success", f"Installed UI files: {', '.join(ui_files_to_install)}") 
+             if ui_files_to_install else 
+             messagebox.showinfo("Information", "No UI files were installed.")),
+            status_window.update_status("Installation complete."),
+            status_window.update_progress(100),
+            status_window.destroy()
+        ])
 
-    if ui_files_to_install:
-        messagebox.showinfo("Success", f"Installed UI files: {', '.join(ui_files_to_install)}")
-    else:
-        messagebox.showinfo("Information", "No UI files were installed.")
-
-    status_window.update_status("Installation complete.")
-    status_window.update_progress(100)
-    status_window.destroy()
+    # Start installation in a background thread
+    import threading
+    threading.Thread(target=background_ui_install, daemon=True).start()
 
 def delete_uifiles_zeal(zeal_dir):
     uifiles_zeal_path = os.path.join(zeal_dir, 'uifiles', 'zeal')
@@ -757,7 +1020,7 @@ def update_quarmtool():
     quarmtool_updated = check_and_update("QuarmTool", quarmtool_version, "EJWellman/QuarmTool", quarmtool_dir, log_widget)
 
     if not quarmtool_updated:
-        log_message("QuarmTool is already up to date.", "green")
+        log_message("QuarmTool is already up to date.", "yellow")
 
 def update_all():
     """
@@ -768,7 +1031,7 @@ def update_all():
     update_zeal()
     update_quarmtool()
     
-    log_message("Completed updating Zeal and QuarmTool", "green")
+    log_message("Completed updating Zeal and QuarmTool", "black")
 
 def run_quarmtool():
     quarmtool_dir = quarmtool_dir_entry.get()
@@ -794,31 +1057,54 @@ def install_quarm_patcher():
         messagebox.showerror("Error", "Please select your Project Quarm directory first.")
         return
 
-    try:
-        # Download URL for the Quarm Patcher zip file
-        download_url = "https://drive.google.com/uc?id=1IGVKZ3l9tdP3SvXLYhwLuHxRToqU8msF"
-        download_path = os.path.join(zeal_dir, "quarm_patcher.zip")
+    def download_patcher():
+        try:
+            # Download URL for the Quarm Patcher zip file
+            download_url = "https://drive.google.com/uc?id=1IGVKZ3l9tdP3SvXLYhwLuHxRToqU8msF"
+            download_path = os.path.join(zeal_dir, "quarm_patcher.zip")
 
-        log_message("Downloading Quarm Patcher...", "black")
-        
-        # Download the file
-        response = requests.get(download_url)
-        with open(download_path, 'wb') as f:
-            f.write(response.content)
+            log_message("Downloading Quarm Patcher...", "black")
+            
+            # Use download_with_retry for more robust downloading
+            success = download_with_retry(download_url, download_path)
+            
+            if success:
+                # Extract in a separate thread to prevent UI freeze
+                import threading
+                threading.Thread(target=extract_patcher, args=(download_path, zeal_dir), daemon=True).start()
+            else:
+                log_message("Failed to download Quarm Patcher", "red")
+                messagebox.showerror("Error", "Failed to download Quarm Patcher")
+                
+        except Exception as e:
+            log_message(f"Error installing Quarm Patcher: {str(e)}", "red")
+            messagebox.showerror("Error", f"Failed to install Quarm Patcher: {str(e)}")
 
-        # Extract the contents to the Zeal directory
-        with zipfile.ZipFile(download_path, 'r') as zip_ref:
-            zip_ref.extractall(zeal_dir)
+    def extract_patcher(download_path, zeal_dir):
+        try:
+            # Extract the contents to the Zeal directory
+            with zipfile.ZipFile(download_path, 'r') as zip_ref:
+                zip_ref.extractall(zeal_dir)
 
-        # Clean up the zip file
-        os.remove(download_path)
-        
-        log_message("Successfully installed Quarm Patcher", "green")
-        messagebox.showinfo("Success", "Quarm Patcher has been installed successfully!")
-        
-    except Exception as e:
-        log_message(f"Error installing Quarm Patcher: {str(e)}", "red")
-        messagebox.showerror("Error", f"Failed to install Quarm Patcher: {str(e)}")
+            # Clean up the zip file
+            os.remove(download_path)
+            
+            # Use root.after to show messagebox in main thread
+            root.after(0, lambda: [
+                log_message("Successfully installed Quarm Patcher", "green"),
+                messagebox.showinfo("Success", "Quarm Patcher has been installed successfully!")
+            ])
+            
+        except Exception as e:
+            # Use root.after to show error in main thread
+            root.after(0, lambda: [
+                log_message(f"Error extracting Quarm Patcher: {str(e)}", "red"),
+                messagebox.showerror("Error", f"Failed to extract Quarm Patcher: {str(e)}")
+            ])
+
+    # Run download in a separate thread
+    import threading
+    threading.Thread(target=download_patcher, daemon=True).start()
 
 def run_quarm_patcher():
     zeal_dir = zeal_dir_entry.get()
@@ -856,6 +1142,46 @@ def run_project_quarm():
     except Exception as e:
         messagebox.showerror("Error", f"Failed to run Project Quarm: {str(e)}")
         log_message(f"Error running Project Quarm: {str(e)}", "red")
+
+# Find this section in your code where the buttons are defined
+def check_quarm_plus_update(parent):
+    """Manual check for Quarm+ updates"""
+    try:
+        log_message("Checking for Quarm+ updates...", "black")
+        response = requests.get("https://api.github.com/repos/blastlaster/QuarmPlus/releases/latest")
+        
+        if response.status_code == 200:
+            latest_version = response.json()['tag_name']
+            latest_ver = latest_version.lstrip('v').strip()
+            current_ver = APP_VERSION.lstrip('v').strip()
+            
+            log_message(f"Current version: {APP_VERSION}", "black")
+            log_message(f"Latest version: {latest_version}", "black")
+            
+            if version.parse(latest_ver) > version.parse(current_ver):
+                if messagebox.askyesno("Update Available", 
+                                     f"A new version ({latest_version}) is available. Would you like to get the update link?"):
+                    try:
+                        # Use both clipboard methods for reliability
+                        parent.clipboard_clear()
+                        parent.clipboard_append("https://github.com/blastlaster/QuarmPlus/releases/latest")
+                        parent.update()
+                        
+                        import pyperclip
+                        pyperclip.copy("https://github.com/blastlaster/QuarmPlus/releases/latest")
+                        
+                        messagebox.showinfo("Update Link Copied",
+                                          "The update link has been copied to your clipboard.")
+                        log_message("Update link copied to clipboard", "green")
+                    except Exception as e:
+                        log_message(f"Error copying to clipboard: {str(e)}", "red")
+                        messagebox.showerror("Error", "Failed to copy update link.")
+            else:
+                messagebox.showinfo("Up to Date", "You have the latest version of Quarm+!")
+                log_message("Quarm+ is up to date", "green")
+    except Exception as e:
+        log_message(f"Error checking for updates: {str(e)}", "red")
+        messagebox.showerror("Error", "Failed to check for updates. Please try again later.")
 
 def is_process_running(process_name):
     """
@@ -929,10 +1255,6 @@ def optimize_settings():
         'MaxFPS': '60',
         'MaxBGFPS': '45',
         'MaxMouseLookFPS': '60',
-        'ChatTimestamps': '2',
-        'Bluecon': 'TRUE',
-        'ZealInput': 'TRUE',
-        'FloatingDamage': 'TRUE'
     }
     
     for section in config.sections():
@@ -956,10 +1278,27 @@ def optimize_settings():
 # Create the main window
 if __name__ == "__main__":
     root = tk.Tk()
-    root.title("Quarm+ v8.4")
-    root.geometry("500x900")
-
-    # Load saved settings
+    root.withdraw()  # Hide the main window initially
+    
+    # Configure logging first
+    log_widget = tk.Text(root, width=70, height=10, wrap=tk.WORD)
+    log_scrollbar = tk.Scrollbar(root, orient="vertical", command=log_widget.yview)
+    log_widget.configure(yscrollcommand=log_scrollbar.set)
+    
+    # Show loading screen
+    try:
+        loading_screen = LoadingScreen(root)
+        root.wait_window(loading_screen)  # Wait for loading screen to close
+    except Exception as e:
+        print(f"Error with loading screen: {str(e)}")
+        traceback.print_exc()
+    
+    # Show main window
+    root.deiconify()  # Show the main window
+    root.title(f"Quarm+ {APP_VERSION}")
+    root.geometry("500x900+20+20")
+    
+    # Load settings and continue with the rest of your application setup
     settings = load_settings()
 
     # Directory input fields
@@ -1028,9 +1367,16 @@ if __name__ == "__main__":
     all_buttons_frame = tk.Frame(root)
     all_buttons_frame.pack(pady=5)
 
-    update_all_button = tk.Button(all_buttons_frame, text="Update/Install Zeal+QT", 
+    update_all_frame = tk.Frame(root)
+    update_all_frame.pack(pady=5)
+
+    update_all_button = tk.Button(update_all_frame, text="Update/Install Zeal+QT", 
                                  command=update_all, height=1, font=("bold"))
     update_all_button.pack(side=tk.LEFT, padx=5)
+
+    check_quarm_update_button = tk.Button(update_all_frame, text="Check for Quarm+ Update",
+                                        command=lambda: check_quarm_plus_update(root), height=1)
+    check_quarm_update_button.pack(side=tk.LEFT, padx=5)
 
     separator = tk.Frame(root, height=2, bd=1, relief=tk.SUNKEN, bg="lightgray")
     separator.pack(fill=tk.X, padx=10, pady=10)
