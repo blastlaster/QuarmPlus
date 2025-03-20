@@ -1,0 +1,2431 @@
+import sys
+import os
+import shutil
+import requests
+import subprocess
+import zipfile
+import py7zr
+import json
+import configparser
+import psutil
+import time
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog, colorchooser, Menu
+from packaging import version
+from datetime import datetime, timedelta
+import re
+
+settings_file = "settings.json"
+APP_VERSION = "v0.2.0"  # Standardized with "v" prefix
+CACHE_DURATION = 3600  # 1 hour in seconds, consistent across the app
+
+class CustomMessageBox(tk.Toplevel):
+    def __init__(self, parent, title, message):
+        print(f"{title}: {message}")
+        super().__init__(parent)
+        self.title(title)
+        self.configure(bg="black")
+        self.transient(parent)
+        self.grab_set()
+
+        self.message_label = tk.Label(self, text=message, fg="white", bg="black",
+                                    font=("Segoe UI", 10), justify="left")
+        self.message_label.pack(padx=20, pady=20)
+
+        self.ok_button = tk.Button(self, text="OK", command=self.destroy,
+                                 font=("Segoe UI", 10), fg="white", bg="#0078D4",
+                                 activebackground="#106EBE")
+        self.ok_button.pack(pady=10)
+
+        self.update_idletasks()
+        lines = message.count('\n') + 1
+        line_height = self.message_label.winfo_reqheight() // lines
+        min_height = max(200, line_height * lines + 60)
+        max_width = max(400, self.message_label.winfo_reqwidth() + 40)
+
+        self.geometry(f"{max_width}x{min_height}")
+
+        self.update_idletasks()
+        x = parent.winfo_x() + (parent.winfo_width() - max_width) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - min_height) // 2
+        self.geometry(f"{max_width}x{min_height}+{x}+{y}")
+
+class AdvancedConfiguratorWindow(tk.Toplevel):
+    def __init__(self, parent, zeal_dir):
+        print(f"Opening configurator for {zeal_dir}")
+        super().__init__(parent)
+        self.title("Advanced Configurator")
+        self.geometry("500x600")
+        self.resizable(False, False)
+        self.configure(bg="black")
+        self.zeal_dir = zeal_dir
+        self.parent = parent
+
+        self.transient(parent)
+        self.grab_set()
+        x = parent.winfo_x() + (parent.winfo_width() - 500) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - 600) // 2
+        self.geometry(f"+{x}+{y}")
+
+        self.main_frame = tk.Frame(self, bg="black", padx=20, pady=15)
+        self.main_frame.pack(expand=True, fill="both")
+
+        tk.Label(self.main_frame, text="Advanced Configurator",
+                fg="white", bg="black", font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 10))
+
+        self.eqclient_path = os.path.join(zeal_dir, 'eqclient.ini')
+        self.config = configparser.ConfigParser()
+        self.config.optionxform = str
+        if os.path.exists(self.eqclient_path):
+            self.config.read(self.eqclient_path)
+        else:
+            self.config['VideoMode'] = {}
+            self.config['Defaults'] = {}
+            self.config['Options'] = {}
+
+        self.notebook = ttk.Notebook(self.main_frame)
+        self.notebook.pack(fill="both", expand=True)
+
+        self.video_frame = tk.Frame(self.notebook, bg="black")
+        self.notebook.add(self.video_frame, text="Video Settings")
+        
+        tk.Label(self.video_frame, text="Video Settings", fg="white", bg="black",
+                font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 10))
+
+        self.windowed_var = tk.BooleanVar(value=self.config.getboolean('Defaults', 'WindowedMode', fallback=False))
+        tk.Checkbutton(self.video_frame, text="Windowed Mode", variable=self.windowed_var,
+                      fg="white", bg="black", selectcolor="black", activebackground="black",
+                      activeforeground="white", font=("Segoe UI", 10)).pack(anchor="w", pady=5)
+
+        tk.Label(self.video_frame, text="Resolution (WxH):", fg="white", bg="black",
+                font=("Segoe UI", 10)).pack(anchor="w", pady=(10, 5))
+        initial_res = f"{self.config.get('VideoMode', 'Width', fallback='1280')}x{self.config.get('VideoMode', 'Height', fallback='720')}"
+        self.resolution_var = tk.StringVar(value=initial_res)
+        tk.Entry(self.video_frame, textvariable=self.resolution_var, bg="#2A3435", fg="white",
+                insertbackground="white", relief="flat").pack(fill="x", pady=5)
+
+        tk.Label(self.video_frame, text="Bits Per Pixel:", fg="white", bg="black",
+                font=("Segoe UI", 10)).pack(anchor="w", pady=(10, 5))
+        self.bpp_var = tk.StringVar(value=self.config.get('VideoMode', 'BitsPerPixel', fallback="32"))
+        tk.Entry(self.video_frame, textvariable=self.bpp_var, bg="#2A3435", fg="white",
+                insertbackground="white", relief="flat").pack(fill="x", pady=5)
+
+        tk.Label(self.video_frame, text="Refresh Rate:", fg="white", bg="black",
+                font=("Segoe UI", 10)).pack(anchor="w", pady=(10, 5))
+        self.refresh_var = tk.StringVar(value=self.config.get('VideoMode', 'RefreshRate', fallback="60"))
+        tk.Entry(self.video_frame, textvariable=self.refresh_var, bg="#2A3435", fg="white",
+                insertbackground="white", relief="flat").pack(fill="x", pady=5)
+
+        self.fps_frame = tk.Frame(self.notebook, bg="black")
+        self.notebook.add(self.fps_frame, text="FPS Settings")
+
+        tk.Label(self.fps_frame, text="FPS Settings", fg="white", bg="black",
+                font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 10))
+
+        tk.Label(self.fps_frame, text="Max FPS:", fg="white", bg="black",
+                font=("Segoe UI", 10)).pack(anchor="w", pady=(10, 5))
+        self.maxfps_var = tk.StringVar(value=self.config.get('Options', 'MaxFPS', fallback="60"))
+        tk.Entry(self.fps_frame, textvariable=self.maxfps_var, bg="#2A3435", fg="white",
+                insertbackground="white", relief="flat").pack(fill="x", pady=5)
+
+        tk.Label(self.fps_frame, text="Max Background FPS:", fg="white", bg="black",
+                font=("Segoe UI", 10)).pack(anchor="w", pady=(10, 5))
+        self.maxbgfps_var = tk.StringVar(value=self.config.get('Options', 'MaxBGFPS', fallback="30"))
+        tk.Entry(self.fps_frame, textvariable=self.maxbgfps_var, bg="#2A3435", fg="white",
+                insertbackground="white", relief="flat").pack(fill="x", pady=5)
+
+        tk.Label(self.fps_frame, text="Max Mouselook FPS:", fg="white", bg="black",
+                font=("Segoe UI", 10)).pack(anchor="w", pady=(10, 5))
+        self.maxmouselookfps_var = tk.StringVar(value=self.config.get('Options', 'MaxMouseLookFPS', fallback="60"))
+        tk.Entry(self.fps_frame, textvariable=self.maxmouselookfps_var, bg="#2A3435", fg="white",
+                insertbackground="white", relief="flat").pack(fill="x", pady=5)
+
+        self.no_fps_limit_var = tk.BooleanVar(value=self.config.getboolean('Options', 'NoFPSLimiter', fallback=False))
+        tk.Checkbutton(self.fps_frame, text="Disable FPS Limiter", variable=self.no_fps_limit_var,
+                      fg="white", bg="black", selectcolor="black", activebackground="black",
+                      activeforeground="white", font=("Segoe UI", 10)).pack(anchor="w", pady=5)
+
+        self.graphics_frame = tk.Frame(self.notebook, bg="black")
+        self.notebook.add(self.graphics_frame, text="Graphics Settings")
+
+        tk.Label(self.graphics_frame, text="Graphics Settings", fg="white", bg="black",
+                font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 10))
+
+        tk.Label(self.graphics_frame, text="Texture Quality:", fg="white", bg="black",
+                font=("Segoe UI", 10)).pack(anchor="w", pady=(10, 5))
+        self.texture_mapping = {"1": "Low", "2": "Medium", "3": "High"}
+        self.texture_var = tk.StringVar()
+        texture_value = self.config.get('Defaults', 'TextureQuality', fallback="3")
+        self.texture_var.set(self.texture_mapping.get(texture_value, "High"))
+        ttk.Combobox(self.graphics_frame, textvariable=self.texture_var,
+                    values=["Low", "Medium", "High"], state='readonly').pack(fill="x", pady=5)
+
+        self.useumbra_var = tk.StringVar(value=self.config.get('Defaults', 'UseUmbra', fallback="TRUE"))
+        tk.Label(self.graphics_frame, text="Use Umbra:", fg="white", bg="black",
+                font=("Segoe UI", 10)).pack(anchor="w", pady=(10, 5))
+        ttk.Combobox(self.graphics_frame, textvariable=self.useumbra_var,
+                    values=["TRUE", "FALSE"], state='readonly').pack(fill="x", pady=5)
+
+        tk.Label(self.graphics_frame, text="Models:", fg="white", bg="black",
+                font=("Segoe UI", 10)).pack(anchor="w", pady=(10, 5))
+        self.models_var = tk.StringVar()
+        current_model_setting = self.config.get('Defaults', 'UseLuclinHumanMale', fallback="FALSE")
+        initial_model = "Modern" if current_model_setting.upper() == "TRUE" else "Classic"
+        self.models_var.set(initial_model)
+        ttk.Combobox(self.graphics_frame, textvariable=self.models_var,
+                    values=["Classic", "Modern"], state='readonly').pack(fill="x", pady=5)
+
+        self.ui_frame = tk.Frame(self.notebook, bg="black")
+        self.notebook.add(self.ui_frame, text="UI Settings")
+
+        tk.Label(self.ui_frame, text="UI Settings", fg="white", bg="black",
+                font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 10))
+
+        self.newui_var = tk.BooleanVar(value=self.config.getboolean('Defaults', 'NewUI', fallback=True))
+        tk.Checkbutton(self.ui_frame, text="Enable New UI", variable=self.newui_var,
+                      fg="white", bg="black", selectcolor="black", activebackground="black",
+                      activeforeground="white", font=("Segoe UI", 10),
+                      command=lambda: self.oldui_var.set(not self.newui_var.get()) if self.newui_var.get() else None).pack(anchor="w", pady=5)
+
+        self.oldui_var = tk.BooleanVar(value=self.config.getboolean('Defaults', 'OldUI', fallback=False))
+        tk.Checkbutton(self.ui_frame, text="Enable Old UI", variable=self.oldui_var,
+                      fg="white", bg="black", selectcolor="black", activebackground="black",
+                      activeforeground="white", font=("Segoe UI", 10),
+                      command=lambda: self.newui_var.set(not self.oldui_var.get()) if self.oldui_var.get() else None).pack(anchor="w", pady=5)
+
+        self.log_var = tk.BooleanVar(value=self.config.getboolean('Defaults', 'Log', fallback=True))
+        tk.Checkbutton(self.ui_frame, text="Enable Chat Logging", variable=self.log_var,
+                      fg="white", bg="black", selectcolor="black", activebackground="black",
+                      activeforeground="white", font=("Segoe UI", 10)).pack(anchor="w", pady=5)
+
+        self.gameplay_frame = tk.Frame(self.notebook, bg="black")
+        self.notebook.add(self.gameplay_frame, text="Gameplay Settings")
+
+        tk.Label(self.gameplay_frame, text="Gameplay Settings", fg="white", bg="black",
+                font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 10))
+
+        self.attackassist_var = tk.BooleanVar(value=self.config.getboolean('Defaults', 'AttackOnAssist', fallback=False))
+        tk.Checkbutton(self.gameplay_frame, text="Attack on Assist", variable=self.attackassist_var,
+                      fg="white", bg="black", selectcolor="black", activebackground="black",
+                      activeforeground="white", font=("Segoe UI", 10)).pack(anchor="w", pady=5)
+
+        self.combatmusic_var = tk.BooleanVar(value=self.config.getboolean('Defaults', 'CombatMusic', fallback=True))
+        tk.Checkbutton(self.gameplay_frame, text="Combat Music", variable=self.combatmusic_var,
+                      fg="white", bg="black", selectcolor="black", activebackground="black",
+                      activeforeground="white", font=("Segoe UI", 10)).pack(anchor="w", pady=5)
+
+        self.nameplatedistance_var = tk.BooleanVar(value=self.config.getboolean('Defaults', 'EnableExtendedNameplateDistance', fallback=True))
+        tk.Checkbutton(self.gameplay_frame, text="Extended Nameplate Distance", variable=self.nameplatedistance_var,
+                      fg="white", bg="black", selectcolor="black", activebackground="black",
+                      activeforeground="white", font=("Segoe UI", 10)).pack(anchor="w", pady=5)
+
+        button_frame = tk.Frame(self.main_frame, bg="black")
+        button_frame.pack(pady=10)
+
+        tk.Button(button_frame, text="Save", command=self.save_config,
+                 font=("Segoe UI", 10), fg="white", bg="#0078D4",
+                 activebackground="#106EBE").pack(side="left", padx=5)
+
+        tk.Button(button_frame, text="Cancel", command=self.destroy,
+                 font=("Segoe UI", 10), fg="white", bg="#0078D4",
+                 activebackground="#106EBE").pack(side="left", padx=5)
+
+    def save_config(self):
+        if not os.access(self.zeal_dir, os.W_OK):
+            self.parent.log_message("No write permission for the Zeal directory.", "red")
+            return
+
+        try:
+            if not os.path.exists(self.eqclient_path):
+                with open(self.eqclient_path, 'w') as configfile:
+                    self.config.write(configfile)
+                self.parent.log_message("Created eqclient.ini file.", "yellow")
+
+            for section in ['VideoMode', 'Defaults', 'Options']:
+                if not self.config.has_section(section):
+                    self.config.add_section(section)
+
+            self.config['Defaults']['WindowedMode'] = str(self.windowed_var.get()).upper()
+            resolution = self.resolution_var.get().strip()
+            if 'x' not in resolution or len(resolution.split('x')) != 2:
+                raise ValueError("Invalid resolution format. Use WxH (e.g., 1920x1080).")
+            width, height = resolution.split('x')
+            if not (width.isdigit() and height.isdigit()):
+                raise ValueError("Width and Height must be numeric.")
+            self.config['VideoMode']['Width'] = width
+            self.config['VideoMode']['Height'] = height
+            if not self.bpp_var.get().strip().isdigit():
+                raise ValueError("Bits Per Pixel must be numeric.")
+            self.config['VideoMode']['BitsPerPixel'] = self.bpp_var.get().strip()
+            if not self.refresh_var.get().strip().isdigit():
+                raise ValueError("Refresh Rate must be numeric.")
+            self.config['VideoMode']['RefreshRate'] = self.refresh_var.get().strip()
+
+            for var, key in [(self.maxfps_var, 'MaxFPS'),
+                            (self.maxbgfps_var, 'MaxBGFPS'),
+                            (self.maxmouselookfps_var, 'MaxMouseLookFPS')]:
+                if not var.get().strip().isdigit():
+                    raise ValueError(f"{key} must be numeric.")
+                self.config['Options'][key] = var.get().strip()
+            self.config['Options']['NoFPSLimiter'] = '1' if self.no_fps_limit_var.get() else '0'
+
+            self.config['Defaults']['TextureQuality'] = {v: k for k, v in self.texture_mapping.items()}.get(self.texture_var.get(), "3")
+            self.config['Defaults']['UseUmbra'] = self.useumbra_var.get()
+
+            model_settings = [
+                'UseLuclinHumanMale', 'UseLuclinHumanFemale',
+                'UseLuclinBarbarianMale', 'UseLuclinBarbarianFemale',
+                'UseLuclinEruditeMale', 'UseLuclinEruditeFemale',
+                'UseLuclinWoodElfMale', 'UseLuclinWoodElfFemale',
+                'UseLuclinHighElfMale', 'UseLuclinHighElfFemale',
+                'UseLuclinDarkElfMale', 'UseLuclinDarkElfFemale',
+                'UseLuclinHalfElfMale', 'UseLuclinHalfElfFemale',
+                'UseLuclinDwarfMale', 'UseLuclinDwarfFemale',
+                'UseLuclinTrollMale', 'UseLuclinTrollFemale',
+                'UseLuclinOgreMale', 'UseLuclinOgreFemale',
+                'UseLuclinHalflingMale', 'UseLuclinHalflingFemale',
+                'UseLuclinGnomeMale', 'UseLuclinGnomeFemale',
+                'UseLuclinIksarMale', 'UseLuclinIksarFemale',
+                'UseLuclinElementals',
+                'UseLuclinVahShirMale', 'UseLuclinVahShirFemale'
+            ]
+            
+            model_value = "TRUE" if self.models_var.get() == "Modern" else "FALSE"
+            for setting in model_settings:
+                self.config['Defaults'][setting] = model_value
+
+            self.config['Defaults']['NewUI'] = str(self.newui_var.get()).upper()
+            self.config['Defaults']['OldUI'] = str(self.oldui_var.get()).upper()
+            self.config['Defaults']['Log'] = str(self.log_var.get()).upper()
+
+            self.config['Defaults']['AttackOnAssist'] = '1' if self.attackassist_var.get() else '0'
+            self.config['Defaults']['CombatMusic'] = '1' if self.combatmusic_var.get() else '0'
+            self.config['Defaults']['EnableExtendedNameplateDistance'] = '1' if self.nameplatedistance_var.get() else '0'
+
+            with open(self.eqclient_path, 'w') as configfile:
+                self.config.write(configfile)
+
+            self.parent.log_message("Advanced configuration saved successfully", "green")
+            self.destroy()
+
+        except ValueError as ve:
+            self.parent.log_message(f"Validation error: {str(ve)}", "red")
+        except PermissionError:
+            self.parent.log_message("Permission denied while writing to eqclient.ini.", "red")
+        except Exception as e:
+            self.parent.log_message(f"Error saving configuration: {str(e)}", "red")
+
+class ChangesDialog(tk.Toplevel):
+    def __init__(self, parent, title, changes):
+        super().__init__(parent)
+        self.title(title)
+        self.configure(bg="black")
+        self.transient(parent)
+        self.grab_set()
+
+        num_lines = len(changes)
+        line_height = 20
+        min_height = max(150, (num_lines * line_height) + 60)
+
+        frame = tk.Frame(self, bg="black")
+        frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+        text_area = tk.Text(
+            frame,
+            bg="black",
+            fg="white",
+            font=("Segoe UI", 10),
+            wrap=tk.WORD,
+            height=num_lines if num_lines <= 12 else 12,
+            width=50,
+            state=tk.NORMAL
+        )
+        text_area.pack(fill=tk.BOTH, expand=True)
+
+        text_area.insert(tk.END, "\n".join(changes))
+        text_area.config(state=tk.DISABLED)
+
+        tk.Button(
+            self,
+            text="OK",
+            command=self.destroy,
+            font=("Segoe UI", 10),
+            fg="white",
+            bg="#0078D4",
+            activebackground="#106EBE"
+        ).pack(pady=5)
+
+        max_width = 400
+        self.geometry(f"{max_width}x{min_height}")
+
+        self.update_idletasks()
+        parent_x = parent.winfo_rootx()
+        parent_y = parent.winfo_rooty()
+        parent_width = parent.winfo_width()
+        parent_height = parent.winfo_height()
+        dialog_width = max_width
+        dialog_height = min_height
+        x = parent_x + (parent_width // 2) - (dialog_width // 2)
+        y = parent_y + (parent_height // 2) - (dialog_height // 2)
+        self.geometry(f"+{x}+{y}")
+
+class ModernLoadingScreen(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title(f"Quarm+ {APP_VERSION}")
+        self.configure(bg="black")
+        
+        self.geometry("800x800")
+        self.resizable(False, False)
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        self.zeal_update_button = None
+        self.quarmtool_update_button = None
+        self.patcher_button = None
+        self.quarmplus_update_button = None
+        
+        self.version_cache = {}
+        self.zeal_versions = []
+        self.full_zeal_versions = []
+        self.quarmtool_versions = []
+        self.prefer_beta = tk.BooleanVar(value=False)  # Default to False (full releases)
+        self.selected_zeal_version = tk.StringVar(value="Latest")
+        self.selected_quarmtool_version = tk.StringVar(value="Latest")
+        self.quarmplus_version_var = tk.StringVar(value="Unknown")
+
+        self.latest_full = "Unknown"  # Default value for full release
+        self.latest_beta = None       # Default value for beta release
+        
+        self.main_frame = tk.Frame(self, bg="black", padx=20, pady=10)
+        self.main_frame.pack(expand=True, fill="both")
+        
+        self.left_frame = tk.Frame(self.main_frame, bg="black")
+        self.left_frame.pack(side=tk.LEFT, padx=(0, 10), fill=tk.Y)
+        
+        self.right_frame = tk.Frame(self.main_frame, bg="black")
+        self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        
+        self.center_frame = tk.Frame(self.right_frame, bg="black")
+        self.center_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.settings = self.load_settings()
+        self.zeal_dir = tk.StringVar(value=self.settings.get("zeal_dir", ""))
+        self.quarmtool_dir = tk.StringVar(value=self.settings.get("quarmtool_dir", ""))
+        self.ui_versions = self.settings.get("ui_versions", {})
+        self.section_states = self.settings.get("section_states", {})
+        self.prefer_beta = tk.BooleanVar(value=self.settings.get("prefer_beta", False))
+        self.section_frames = {}
+
+        self.create_sections()
+        self.center_window_with_padding()
+        self.after(100, self.perform_initial_setup)
+        
+        ascii_art = '''                                                           
+                         $$$$$&&&&&&                        
+                       $$$X:::xxx$&&&                       
+               $$$$$.......:::xxxxxxxxxxx&&&&               
+          $$$$$.....:::;&&&&&&&&&&&&&xxxxxxxx&&&&&          
+     $$$$$......:;&&&&&&xXXXXX$$$$$$$&&&&Xxxxxxxxx&&&&&     
+     $$....:&&&&&&$X;;XXxxxxxxxxxxXX$$$$$&&&&&&&$xxxx&&     
+     $$.:::;&&&xxxxxxxxxXXXXXXXXXxxxxXXXX$$$$&&&$xxxx&&     
+     $$.:X&&$$$....;xXXXX$$$$$$&&&&XxxxxXXXXX&&&&&&xx&&     
+     $$::X&&xXx..XXXXx$$........:;;&&XXxxxxxX$$$&&&xx&&     
+     $$::X&&xxxXXxXX$$....:;;;.....;;&&XXxxxx$$$&&&xx&&     
+     $$::X&&xxX..x$$....;;x&&&&&:....xx&&&XXx$$$&&&xx&&     
+     $$::X&&xxXxxX$$..:;&&&&&&&&&&X..xx&&&$xX$$$&&&xx&&     
+     $$::X&&xxxXXX$$..;;&&&xxxXX&&X..xx&&&$XX$$$&&&xx&&     
+     $$::X&&xxxxXX$$..;;&&&xXxxx&&X..xx&&&$Xx$$$&&&xx&&     
+     $$::X&&xxXxxX$$..;;&&&xxXxx&&X..xx&&&$Xx$$$&&&xx&&     
+     $$::X&&xxxXXX$$..;;&&&XxxXx&&X..xx&&&$Xx$$$&&&xx&&     
+     $$::X&&XXXxxX$$..;;&&&xx$$$$&X..xx&&&$XX$$$&&&xx&&     
+     $$::X&&$XxXX$$..:;&&&x$$xxxx;::xx&&&$XX$&&&&$xx&&     
+       &:::&XxxXX$$$...;&&&X&$.....xx$$&&&$$$$$$&&xx&       
+        &&:;&&&xx$&$::..&$$&&&:::....&&&&&$$$&&&$x&&        
+         &:;&&&xxXX$&&....:$$$&&;....;;$&&$x$$$$$&$&        
+         &::;$&&XxxX&&;;......;;xXx....;;$$$$$$$X&&&        
+          &&:;;&&xxxx$&&:;;xxxxxxxXXx.;xX$$X.$$$$$$&&       
+          &&XX::&&&XxXx$&&&&&&&&&&&&&;;X;.$$$$...$$$&&&     
+             &&:;&&&xxxXXXXXXX$$$$$$$&&$:.$X.......$&&&&&   
+               &xx;x&&&&xxXXXx$$$$$$$&&$:.$X.......$&&&&&   
+               &&&;;;;;&&&&xXX$$&&&&&&&$$$$$$$...&&&&&&     
+                  &&;;;;;;x&&&&&&&xxxxX&&&$$$$$$$&&&&&&     
+                    &&&;;;;XXX$$$$xx&&& $&&&&&&&&&&&&       
+                       &&&;;;;xxx$&&&       &&&&&&&         
+                       &&&&&&&&&&&&&&                  
+
+                  You're in our world now.
+                                                            '''
+        # List of UI folders to delete during installations
+        self.ui_folders_to_delete = [
+            "Infiniti-Blue",
+            "Nemesis",
+            "poweroftwo",
+            "QQ",
+            "TK_Steamworks",
+            "vert",
+            "WizModRyo"
+        ]
+
+        self.art_label = tk.Label(self.center_frame, text=ascii_art, 
+                                 font=('Courier New', 8), 
+                                 fg="lightgray", 
+                                 bg="black", 
+                                 justify=tk.LEFT)
+        self.art_label.pack(pady=(0, 0))
+        
+        self.logger_label = tk.Label(self.center_frame, text="Initializing Quarm+...", 
+                                   fg="white", bg="black", 
+                                   font=("Segoe UI", 10), 
+                                   wraplength=400, justify="left")
+        self.logger_label.pack(pady=(0, 0))
+        
+        self.status_label = tk.Label(self.center_frame, 
+                                   text="", 
+                                   fg="white", 
+                                   bg="black", 
+                                   font=("Segoe UI", 10),
+                                   wraplength=400)
+        self.status_label.pack(pady=(5, 0))
+        
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(self.center_frame, 
+                                          variable=self.progress_var, 
+                                          maximum=100, 
+                                          length=400)
+        self.progress_bar.pack(pady=(0, 30))
+        
+        self.button_frame = tk.Frame(self.center_frame, bg="black")
+        self.button_frame.pack(pady=5)
+        
+        self.run_button_frame = tk.Frame(self.button_frame, bg="black")
+        self.run_button_frame.pack()
+        
+        tk.Button(self.run_button_frame, 
+                 text="Run QuarmTool",
+                 command=self.run_quarmtool,
+                 font=("Segoe UI", 10),
+                 fg="white",
+                 bg="#0078D4",
+                 activebackground="#106EBE").pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(self.run_button_frame, 
+                 text="Run Quarm",
+                 command=self.run_project_quarm,
+                 font=("Segoe UI", 10),
+                 fg="white",
+                 bg="#0078D4",
+                 activebackground="#106EBE").pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(self.run_button_frame, 
+                 text="Run Patcher",
+                 command=self.run_quarm_patcher,
+                 font=("Segoe UI", 10),
+                 fg="white",
+                 bg="#0078D4",
+                 activebackground="#106EBE").pack(side=tk.LEFT, padx=5)
+        
+        self.update_button_frame = tk.Frame(self.button_frame, bg="black")
+        self.update_button_frame.pack(pady=(5, 0))
+
+        tk.Button(self.update_button_frame, 
+                 text="Check for Updates",
+                 command=self.check_and_install_updates,
+                 font=("Segoe UI", 10),
+                 fg="white",
+                 bg="#0078D4",
+                 activebackground="#106EBE").pack()
+        
+        self.canvas = tk.Canvas(self.right_frame, bg="black", highlightthickness=0)
+        self.scrollable_frame = tk.Frame(self.canvas, bg="black")
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.pack(side="left", fill="both", expand=True)
+        
+        self.settings = self.load_settings()
+        self.zeal_dir = tk.StringVar(value=self.settings.get("zeal_dir", ""))
+        self.quarmtool_dir = tk.StringVar(value=self.settings.get("quarmtool_dir", ""))
+        self.zeal_version_var = tk.StringVar(value="Unknown")
+        self.quarmtool_version_var = tk.StringVar(value="Unknown")
+        self.ui_versions = self.settings.get("ui_versions", {})
+        self.section_states = self.settings.get("section_states", {})
+        self.prefer_beta = tk.BooleanVar(value=self.settings.get("prefer_beta", False))
+        self.section_frames = {}
+        
+        self.create_sections()
+        
+        self.center_window_with_padding()
+        
+        self.after(100, self.perform_initial_setup)
+
+    def on_closing(self):
+        self.log_message("", "white")
+        self.save_settings()
+        self.destroy()
+
+    def initialize_ui_versions(self):
+        if not self.zeal_dir.get():
+            return
+        
+        ui_names = [
+            "Nillipuss UI 1080p",
+            "Nillipuss UI 1440p",
+            "Qrustle1080-Z5x",
+            "Qrustle1440-Z5x",
+            "DuxaUI",
+            "qqui (Calmethar Edition)",
+            "FrankenPussUI"
+        ]
+        
+        static_uis = {
+            "qqui (Calmethar Edition)": "1.0.0",
+            "DuxaUI": "1.0.0",
+            "Qrustle1080-Z5x": "1.0.0",
+            "Qrustle1440-Z5x": "1.0.0"
+        }
+        
+        dynamic_uis = {
+            "Nillipuss UI 1080p": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest",
+            "Nillipuss UI 1440p": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest",
+            "FrankenPussUI": "https://api.github.com/repos/anotheregostar/FrankenPussUI/releases/latest"
+        }
+        
+        for ui_name in ui_names:
+            if self.is_ui_installed(ui_name, self.zeal_dir.get()) and ui_name not in self.ui_versions:
+                if ui_name in static_uis:
+                    latest_version_raw = static_uis[ui_name]
+                    latest_version = self.normalize_version(latest_version_raw)
+                else:
+                    try:
+                        response = requests.get(dynamic_uis[ui_name], timeout=5)
+                        response.raise_for_status()
+                        latest_version_raw = response.json().get("tag_name", "0.0.0")
+                        latest_version = self.normalize_version(latest_version_raw)
+                    except Exception as e:
+                        self.log_message(f"Error fetching version for {ui_name} during initialization: {str(e)}", "yellow")
+                        latest_version_raw = "0.0.0"
+                        latest_version = "0.0.0"
+                
+                self.ui_versions[ui_name] = {
+                    "raw": latest_version_raw,
+                    "normalized": latest_version
+                }
+                self.log_message(f"Initialized ui_versions for {ui_name}: {self.ui_versions[ui_name]}", "yellow")
+        
+        self.save_settings()
+
+    def perform_initial_setup(self):
+        self.initialize_ui_versions()
+        self.initial_version_check()
+        self.check_for_updates_on_start()
+        self.update_zeal_button()
+        self.update_quarmtool_button()
+        self.update_quarmplus_button()
+        self.update_patcher_button()
+        self.update_ui_selection()
+
+    def delete_unwanted_ui_folders(self, zeal_dir):
+        uifiles_dir = os.path.join(zeal_dir, "uifiles")
+        if not os.path.exists(uifiles_dir):
+            return
+        
+        for folder in self.ui_folders_to_delete:
+            folder_path = os.path.join(uifiles_dir, folder)
+            if os.path.exists(folder_path):
+                try:
+                    shutil.rmtree(folder_path)
+                    self.log_message(f"Removed unwanted UI folder: {folder}", "yellow")
+                except Exception as e:
+                    self.log_message(f"Error removing {folder}: {str(e)}", "red")
+
+    def log_message(self, message, color="white"):
+        if hasattr(self, 'logger_label'):
+            self.logger_label.config(text=message, fg=color)
+        else:
+            print(f"Warning: logger_label not available - Message: {message}, Color: {color}")
+
+    def load_settings(self):
+        settings_file = "settings.json"
+        default_settings = {
+            "version": APP_VERSION,
+            "zeal_dir": "",
+            "quarmtool_dir": "",
+            "ui_versions": {},
+            "section_states": {},
+            "prefer_beta": False
+        }
+
+        if os.path.exists(settings_file):
+            try:
+                with open(settings_file, 'r') as f:
+                    loaded_settings = json.load(f)
+
+                settings_version = loaded_settings.get("version", "v0.0.0")
+                if settings_version != APP_VERSION:
+                    self.log_message(f"Settings version {settings_version} is outdated (expected {APP_VERSION}). Migrating settings...", "yellow")
+                    migrated_settings = self.migrate_settings(loaded_settings, default_settings)
+                    self.log_message(f"Loaded settings after migration: ui_versions={migrated_settings['ui_versions']}", "yellow")
+                    return migrated_settings
+                else:
+                    # Normalize ui_versions by stripping 'v' prefix
+                    if "ui_versions" in loaded_settings:
+                        for app_name in loaded_settings["ui_versions"]:
+                            if "raw" in loaded_settings["ui_versions"][app_name]:
+                                loaded_settings["ui_versions"][app_name]["raw"] = loaded_settings["ui_versions"][app_name]["raw"].lstrip("v")
+                    # Merge loaded settings with defaults
+                    for key, value in default_settings.items():
+                        if key not in loaded_settings:
+                            loaded_settings[key] = value
+                    self.log_message(f"Loaded settings: ui_versions={loaded_settings['ui_versions']}", "yellow")
+                    return loaded_settings
+
+            except (json.JSONDecodeError, Exception) as e:
+                self.log_message(f"Error loading settings.json: {str(e)}. Resetting to defaults.", "red")
+                if os.path.exists(settings_file):
+                    shutil.move(settings_file, f"{settings_file}.bak_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+                return default_settings
+        return default_settings
+
+    def migrate_settings(self, old_settings, default_settings):
+        """
+        Migrate old settings to the current version format.
+        """
+        migrated_settings = default_settings.copy()
+
+        # Preserve existing values where possible
+        for key in ["zeal_dir", "quarmtool_dir", "ui_versions", "section_states", "prefer_beta"]:
+            if key in old_settings:
+                migrated_settings[key] = old_settings[key]
+
+        # Handle specific migrations based on version if needed
+        old_version = old_settings.get("version", "v0.0.0")
+        try:
+            if version.parse(old_version) < version.parse("v0.2.0"):
+                # Example migration: Convert old boolean strings to actual booleans
+                if isinstance(migrated_settings["prefer_beta"], str):
+                    migrated_settings["prefer_beta"] = migrated_settings["prefer_beta"].lower() == "true"
+        except version.InvalidVersion:
+            self.log_message(f"Invalid version in settings: {old_version}. Using defaults where necessary.", "yellow")
+
+        migrated_settings["version"] = APP_VERSION
+        self.log_message("Settings migrated successfully.", "green")
+        return migrated_settings
+
+    def save_settings(self):
+        settings = {
+            "version": APP_VERSION,
+            "zeal_dir": self.zeal_dir.get(),
+            "quarmtool_dir": self.quarmtool_dir.get(),
+            "ui_versions": self.ui_versions,
+            "section_states": self.section_states,
+            "prefer_beta": self.prefer_beta.get()
+        }
+        try:
+            with open("settings.json", 'w') as f:
+                json.dump(settings, f, indent=4)
+        except Exception as e:
+            self.log_message(f"Error saving settings: {str(e)}", "red")
+
+    def update_progress(self, value):
+        self.progress_var.set(value)
+        self.update()
+
+    def initial_version_check(self):
+        self.log_message("Checking initial versions...", "white")
+        try:
+            zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("iamclint/Zeal"))
+            self.zeal_versions = zeal_data["full"] + zeal_data["beta"]
+            self.full_zeal_versions = zeal_data["full"]
+            self.latest_full = zeal_data["full"][0] if zeal_data["full"] else "Unknown"
+            self.latest_beta = zeal_data["beta"][0] if zeal_data["beta"] else None
+            latest_zeal = self.latest_beta if self.prefer_beta.get() and self.latest_beta else self.latest_full
+
+            # Set selected_zeal_version based on installed version if available
+            current_zeal = self.ui_versions.get("Zeal", {}).get("raw", None)
+            if self.is_zeal_installed() and current_zeal:
+                self.selected_zeal_version.set(current_zeal)  # Removed "v" + prefix
+            else:
+                self.selected_zeal_version.set(latest_zeal if latest_zeal != "Unknown" else "Unknown")
+
+            # Fetch QuarmTool versions
+            self.quarmtool_versions = self.get_cached_version("quarmtool_versions", lambda: self.fetch_versions("EJWellman/QuarmTool"))
+            current_qt = self.ui_versions.get("QuarmTool", {}).get("raw", None)
+            if self.is_quarmtool_installed() and current_qt:
+                self.selected_quarmtool_version.set(current_qt)
+            else:
+                self.selected_quarmtool_version.set(self.quarmtool_versions[0] if self.quarmtool_versions else "Unknown")
+
+            self.zeal_version_var.set(latest_zeal)
+            self.quarmtool_version_var.set(self.quarmtool_versions[0] if self.quarmtool_versions else "Unknown")
+            if self.full_zeal_versions and self.quarmtool_versions:
+                self.log_message(f"Zeal version: {self.zeal_version_var.get()}, QuarmTool version: {self.quarmtool_version_var.get()}", "white")
+            else:
+                self.log_message("Some versions could not be checked. Please try again later.", "yellow")
+        except Exception as e:
+            self.log_message(f"Error during initial version check: {str(e)}", "red")
+            self.zeal_version_var.set("Unknown")
+            self.quarmtool_version_var.set("Unknown")
+            current_zeal = self.ui_versions.get("Zeal", {}).get("raw", None)
+            if self.is_zeal_installed() and current_zeal:
+                self.selected_zeal_version.set(current_zeal)  # Removed "v" + prefix
+            else:
+                self.selected_zeal_version.set("Unknown")
+            current_qt = self.ui_versions.get("QuarmTool", {}).get("raw", None)
+            if self.is_quarmtool_installed() and current_qt:
+                self.selected_quarmtool_version.set(current_qt)
+            else:
+                self.selected_quarmtool_version.set("Unknown")
+
+        self.update_zeal_button()
+        self.update_quarmtool_button()
+
+    def check_for_updates_on_start(self):
+        self.log_message("Checking for updates...", "white")
+        self.update_progress(0)
+        try:
+            updates = []
+
+            # Zeal update check
+            if not self.is_zeal_installed():
+                if "Zeal" in self.ui_versions:
+                    del self.ui_versions["Zeal"]
+                    self.save_settings()
+                if "zeal_versions" in self.version_cache:
+                    del self.version_cache["zeal_versions"]
+                updates.append("Zeal")
+            else:
+                zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("iamclint/Zeal"))
+                self.zeal_versions = zeal_data["full"] + zeal_data["beta"]
+                self.latest_full = zeal_data["full"][0] if zeal_data["full"] else "Unknown"
+                self.latest_beta = zeal_data["beta"][0] if zeal_data["beta"] else None
+                latest_zeal = self.latest_beta if self.prefer_beta.get() and self.latest_beta else self.latest_full
+                current_zeal_raw = self.ui_versions.get("Zeal", {}).get("raw", "0.0.0")
+                current_zeal_normalized = self.ui_versions.get("Zeal", {}).get("normalized", "0.0.0")
+
+                # Set selected_zeal_version to installed version without 'v' prefix
+                if current_zeal_raw and current_zeal_raw != "0.0.0":
+                    self.selected_zeal_version.set(current_zeal_raw)  # Removed "v" + prefix
+
+                if latest_zeal and latest_zeal != "Unknown":
+                    latest_zeal_normalized = self.normalize_version(latest_zeal)
+                    if self.prefer_beta.get() and self.latest_beta:
+                        if version.parse(latest_zeal_normalized) > version.parse(current_zeal_normalized):
+                            updates.append("Zeal")
+                    elif not self.prefer_beta.get() and self.latest_full:
+                        if version.parse(latest_zeal_normalized) > version.parse(current_zeal_normalized):
+                            updates.append("Zeal")
+
+            # QuarmTool update check
+            if not self.is_quarmtool_installed():
+                if "QuarmTool" in self.ui_versions:
+                    del self.ui_versions["QuarmTool"]
+                    self.save_settings()
+                if "quarmtool_versions" in self.version_cache:
+                    del self.version_cache["quarmtool_versions"]
+                updates.append("QuarmTool")
+            else:
+                self.quarmtool_versions = self.get_cached_version("quarmtool_versions", lambda: self.fetch_versions("EJWellman/QuarmTool"))
+                current_qt = self.ui_versions.get("QuarmTool", {}).get("raw", "0.0.0")
+                current_qt_normalized = self.ui_versions.get("QuarmTool", {}).get("normalized", "0.0.0")
+
+                # Set selected_quarmtool_version to installed version without modification
+                if current_qt and current_qt != "0.0.0":
+                    self.selected_quarmtool_version.set(current_qt)  # Already correct, no "v" prefix added
+
+                latest_qt = self.quarmtool_versions[0] if self.quarmtool_versions else "Unknown"
+                if latest_qt and latest_qt != "Unknown":
+                    latest_qt_normalized = self.normalize_version(latest_qt)
+                    if version.parse(latest_qt_normalized) > version.parse(current_qt_normalized):
+                        updates.append("QuarmTool")
+
+            # Quarm+ update check
+            response = requests.get("https://api.github.com/repos/blastlaster/QuarmPlus/releases/latest", timeout=5)
+            if response.status_code == 200:
+                latest_version = response.json()['tag_name']
+                self.quarmplus_version_var.set(latest_version)
+                if version.parse(latest_version) > version.parse(APP_VERSION):
+                    updates.append("Quarm+")
+
+            if updates:
+                update_message = "Update(s) available for " + ", ".join(updates) + " - \nChoose desired version, then click the yellow button(s) under 'Install/Update'"
+                self.log_message(update_message, "#ADD8E6")
+            else:
+                self.log_message("Up to date - Ready to play!", "green")
+
+        except Exception as e:
+            self.log_message(f"Error checking updates: {str(e)}", "red")
+        finally:
+            self.update_progress(100)
+            self.update_zeal_button()
+            self.update_quarmtool_button()
+            self.update_quarmplus_button()
+
+    def update_zeal_button(self):
+        if self.zeal_update_button is None:
+            return
+        zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("iamclint/Zeal"))
+        latest_full = zeal_data["full"][0] if zeal_data["full"] else "Unknown"
+        latest_beta = zeal_data["beta"][0] if zeal_data["beta"] else None
+        latest_zeal = latest_beta if self.prefer_beta.get() and latest_beta else latest_full
+        latest_zeal_normalized = self.normalize_version(latest_zeal) if latest_zeal != "Unknown" else "0.0.0"
+        
+        selected_version = self.selected_zeal_version.get()
+        current_zeal = self.ui_versions.get("Zeal", {}).get("raw", "Unknown")
+        current_zeal_normalized = self.ui_versions.get("Zeal", {}).get("normalized", "0.0.0")
+        
+        if selected_version == "Latest":
+            selected_version = latest_zeal
+            self.selected_zeal_version.set(selected_version)
+
+        if not self.is_zeal_installed():
+            button_text = f"Install Zeal ({selected_version})"
+            self.zeal_update_button.config(
+                text=button_text,
+                bg="yellow",
+                fg="black",
+                activebackground="yellow"
+            )
+        else:
+            if selected_version in ["Unknown", "Loading..."] or not selected_version:
+                self.zeal_update_button.config(
+                    text=f"Zeal (Version Unknown)",
+                    bg="#0078D4",
+                    fg="white",
+                    activebackground="#106EBE"
+                )
+            else:
+                selected_version_normalized = self.normalize_version(selected_version)
+                latest_zeal_raw = latest_zeal.lstrip("v") if isinstance(latest_zeal, str) else "Unknown"
+                
+                # Normalize both versions for comparison
+                selected_version_raw = selected_version.lstrip("v")
+                current_zeal_raw = current_zeal.lstrip("v") if isinstance(current_zeal, str) else current_zeal
+                
+                is_latest = (current_zeal_normalized == latest_zeal_normalized and current_zeal_raw == latest_zeal_raw)
+                is_selected_installed = (selected_version_normalized == current_zeal_normalized and selected_version_raw == current_zeal_raw)
+                
+                is_selected_older = version.parse(selected_version_normalized) < version.parse(current_zeal_normalized) if selected_version_normalized and current_zeal_normalized else False
+                
+                if is_latest and is_selected_installed:
+                    button_text = f"Zeal ({current_zeal}) 🗹"
+                    self.zeal_update_button.config(
+                        text=button_text,
+                        bg="#0078D4",
+                        fg="white",
+                        activebackground="#106EBE"
+                    )
+                elif is_selected_installed:
+                    button_text = f"Zeal ({current_zeal})"
+                    self.zeal_update_button.config(
+                        text=button_text,
+                        bg="#FF4040",
+                        fg="white",
+                        activebackground="#CC3333"
+                    )
+                elif is_selected_older:
+                    button_text = f"Install Zeal ({selected_version})"
+                    self.zeal_update_button.config(
+                        text=button_text,
+                        bg="#FF9913",
+                        fg="black",
+                        activebackground="#FF9913"
+                    )
+                else:
+                    button_text = f"Install Zeal ({selected_version})"
+                    self.zeal_update_button.config(
+                        text=button_text,
+                        bg="yellow",
+                        fg="black",
+                        activebackground="yellow"
+                    )
+
+    def update_quarmtool_button(self):
+        if self.quarmtool_update_button is None:
+            return
+        selected_version = self.selected_quarmtool_version.get()
+        current_qt = self.ui_versions.get("QuarmTool", {}).get("raw", "Unknown")
+        current_qt_normalized = self.ui_versions.get("QuarmTool", {}).get("normalized", "0.0.0")
+        
+        latest_qt = self.quarmtool_versions[0] if self.quarmtool_versions else "Unknown"
+        latest_qt_normalized = self.normalize_version(latest_qt) if latest_qt != "Unknown" else "0.0.0"
+        
+        if not self.is_quarmtool_installed():
+            if selected_version in ["Unknown", "Loading..."] or not selected_version:
+                selected_version = latest_qt
+                self.selected_quarmtool_version.set(selected_version)
+            button_text = f"Install QuarmTool ({selected_version})"
+            self.quarmtool_update_button.config(
+                text=button_text,
+                bg="yellow",
+                fg="black",
+                activebackground="yellow"
+            )
+        else:
+            if selected_version in ["Unknown", "Loading..."] or not selected_version:
+                self.quarmtool_update_button.config(
+                    text=f"QuarmTool (Version Unknown)",
+                    bg="#0078D4",
+                    fg="white",
+                    activebackground="#106EBE"
+                )
+            else:
+                selected_version_normalized = self.normalize_version(selected_version)
+                selected_version_raw = selected_version.lstrip("v")
+                current_qt_raw = current_qt.lstrip("v") if isinstance(current_qt, str) else current_qt
+                latest_qt_raw = latest_qt.lstrip("v") if isinstance(latest_qt, str) else latest_qt
+                
+                is_selected_installed = (selected_version_normalized == current_qt_normalized and selected_version_raw == current_qt_raw)
+                is_latest = (current_qt_normalized == latest_qt_normalized and current_qt_raw == latest_qt_raw)
+                
+                is_selected_older = version.parse(selected_version_normalized) < version.parse(current_qt_normalized) if selected_version_normalized and current_qt_normalized else False
+                
+                if is_selected_installed and is_latest:
+                    button_text = f"QuarmTool ({current_qt}) 🗹"
+                    self.quarmtool_update_button.config(
+                        text=button_text,
+                        bg="#0078D4",
+                        fg="white",
+                        activebackground="#106EBE"
+                    )
+                elif is_selected_installed:
+                    button_text = f"QuarmTool ({current_qt})"
+                    self.quarmtool_update_button.config(
+                        text=button_text,
+                        bg="#FF4040",
+                        fg="white",
+                        activebackground="#CC3333"
+                    )
+                elif is_selected_older:
+                    button_text = f"Install QuarmTool ({selected_version})"
+                    self.quarmtool_update_button.config(
+                        text=button_text,
+                        bg="#FF9913",
+                        fg="black",
+                        activebackground="#FF9913"
+                    )
+                else:
+                    button_text = f"Install QuarmTool ({selected_version})"
+                    self.quarmtool_update_button.config(
+                        text=button_text,
+                        bg="yellow",
+                        fg="black",
+                        activebackground="yellow"
+                    )
+
+    def update_quarmplus_button(self):
+        if self.quarmplus_update_button is None:
+            return
+        
+        current_version = APP_VERSION
+        latest_version = self.quarmplus_version_var.get() if hasattr(self, 'quarmplus_version_var') else "Unknown"
+        
+        if latest_version in ["Unknown", "Loading..."] or not latest_version:
+            self.quarmplus_update_button.config(
+                text=f"Quarm+ ({current_version})",
+                bg="#0078D4", fg="white", activebackground="#106EBE"
+            )
+        else:
+            is_newer_available = version.parse(latest_version) > version.parse(current_version)
+            button_text = f"Quarm+ ({current_version})"
+            if not is_newer_available:
+                button_text += " 🗹"
+            
+            if is_newer_available:
+                self.quarmplus_update_button.config(
+                    text=button_text, bg="#FF4040", fg="white", activebackground="#FF4040"
+                )
+            else:
+                self.quarmplus_update_button.config(
+                    text=button_text, bg="#0078D4", fg="white", activebackground="#106EBE"
+                )
+
+    def update_patcher_button(self):
+        if self.patcher_button is None:
+            return
+        if not self.is_quarm_patcher_installed():
+            self.patcher_button.config(text="Install Quarm Patcher", fg="white", bg="#FF4040", 
+                                      activebackground="#FF4040", activeforeground="white")
+        else:
+            self.patcher_button.config(text="Quarm Patcher 🗹", fg="white", bg="#0078D4", 
+                                      activebackground="#106EBE", activeforeground="white")
+
+    def update_ui_selection(self):
+        if "UI Selection" not in self.section_frames:
+            return
+        
+        current_message = self.logger_label.cget("text")
+        current_color = self.logger_label.cget("fg")
+        
+        header, content_frame = self.section_frames["UI Selection"]
+        content_frame.destroy()
+        
+        content_frame = tk.Frame(header.master, bg="black")
+        state = self.section_states.get("UI Selection", True)
+        if state:
+            content_frame.pack(fill=tk.X, pady=(5, 0))
+        self.section_frames["UI Selection"] = (header, content_frame)
+        
+        ui_items = [
+            ("Nillipuss UI 1080p", lambda: self.install_ui_files_for_update("Nillipuss UI 1080p")),
+            ("Nillipuss UI 1440p", lambda: self.install_ui_files_for_update("Nillipuss UI 1440p")),
+            ("Qrustle1080-Z5x", lambda: self.install_ui_files_for_update("Qrustle1080-Z5x")),
+            ("Qrustle1440-Z5x", lambda: self.install_ui_files_for_update("Qrustle1440-Z5x")),
+            ("DuxaUI", lambda: self.install_ui_files_for_update("DuxaUI")),
+            ("qqui (Calmethar Edition)", lambda: self.install_ui_files_for_update("qqui (Calmethar Edition)")),
+            ("FrankenPussUI", lambda: self.install_ui_files_for_update("FrankenPussUI"))
+        ]
+        
+        for label, command in ui_items:
+            is_installed = self.is_ui_installed(label, self.zeal_dir.get())
+            needs_update = self.should_show_update_button(label) if is_installed else False
+            
+            if label == "qqui (Calmethar Edition)":
+                ui_path = os.path.join(self.zeal_dir.get(), "uifiles", "qqui_CalmetharEd")
+                is_installed = os.path.isdir(ui_path) and len(os.listdir(ui_path)) > 0
+            
+            if is_installed:
+                if not needs_update:
+                    bg_color = "#008000"  # Green for installed and up-to-date
+                    fg_color = "white"
+                else:
+                    bg_color = "#008000"  # Green background
+                    fg_color = "#FF0000"  # Red text for update available
+            else:
+                bg_color = "#0078D4"  # Blue for not installed
+                fg_color = "black"
+            
+            button = tk.Button(
+                content_frame,
+                text=label,
+                command=command,
+                font=("Segoe UI", 10),
+                fg=fg_color,
+                bg=bg_color,
+                activebackground="#106EBE" if bg_color == "#0078D4" else bg_color,
+                activeforeground=fg_color,
+            )
+            button.pack(fill=tk.X, pady=2)
+        
+        self.log_message(current_message, current_color)
+
+    def create_sections(self):
+        for widget in self.left_frame.winfo_children():
+            widget.destroy()
+        self.section_frames.clear()
+
+        def create_command(instance, method):
+            return lambda: method.__get__(instance)()
+
+        sections = [
+            ("Directory Selection", [
+                ("Select Zeal Directory", self.select_zeal_dir),
+                ("Select QuarmTool Directory", self.select_quarmtool_dir),
+            ]),
+            ("Install/Update", [
+                ("Zeal", self.update_zeal, "zeal_install_button"),
+                ("Prefer Zeal Beta Releases", None, "beta_checkbox"),
+                ("QuarmTool", self.update_quarmtool, "quarmtool_install_button"),
+                ("Quarm+", self.update_quarmplus, "quarmplus_install_button"),
+                ("Quarm Patcher", self.install_quarm_patcher, "patcher_button")
+            ]),
+            ("UI Selection", [
+                ("Nillipuss UI 1080p", lambda: self.install_ui_files_for_update("Nillipuss UI 1080p")),
+                ("Nillipuss UI 1440p", lambda: self.install_ui_files_for_update("Nillipuss UI 1440p")),
+                ("Qrustle1080-Z5x", lambda: self.install_ui_files_for_update("Qrustle1080-Z5x")),
+                ("Qrustle1440-Z5x", lambda: self.install_ui_files_for_update("Qrustle1440-Z5x")),
+                ("DuxaUI", lambda: self.install_ui_files_for_update("DuxaUI")),
+                ("qqui (Calmethar Edition)", lambda: self.install_ui_files_for_update("qqui (Calmethar Edition)")),
+                ("FrankenPussUI", lambda: self.install_ui_files_for_update("FrankenPussUI"))
+            ]),
+            ("Utilities", [
+                ("Apply WASD Shortcuts", create_command(self, self.apply_wasd_shortcuts)),
+                ("Optimize Settings", create_command(self, self.optimize_settings)),
+                ("Advanced Configurator", create_command(self, self.open_advanced_configurator))
+            ])
+        ]
+
+        for section_name, items in sections:
+            section_frame = tk.Frame(self.left_frame, bg="black")
+            section_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+            state = self.section_states.get(section_name, True)
+            arrow = "▼" if state else "▶"
+            header = tk.Label(section_frame, text=f"{arrow} {section_name}", font=("Segoe UI", 12, "bold"),
+                             fg="white", bg="black", cursor="hand2")
+            header.pack(anchor="w", padx=5, pady=2)
+            header.bind("<Button-1>", lambda event, name=section_name: self.toggle_section(name))
+
+            content_frame = tk.Frame(section_frame, bg="black")
+            if state:
+                content_frame.pack(fill=tk.BOTH, expand=True)
+
+            self.section_frames[section_name] = (header, content_frame)
+
+            for item in items:
+                if len(item) == 3:
+                    label, var_or_command, command_or_id = item
+                    item_frame = tk.Frame(content_frame, bg="black")
+                    item_frame.pack(fill=tk.X, pady=2)
+
+                    if command_or_id == "zeal_install_button":
+                        zeal_frame = tk.Frame(item_frame, bg="black")
+                        zeal_frame.pack(fill=tk.X)
+                        self.zeal_update_button = tk.Button(
+                            zeal_frame,
+                            text=f"Zeal (Version Unknown)",
+                            command=var_or_command,
+                            font=("Segoe UI", 10),
+                            fg="white",
+                            bg="#0078D4",
+                            activebackground="#106EBE"
+                        )
+                        self.zeal_update_button.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                        tk.Button(
+                            zeal_frame,
+                            text="▼",
+                            command=lambda: self.show_version_dropdown("Zeal", zeal_frame),
+                            font=("Segoe UI", 10),
+                            fg="white",
+                            bg="#0078D4",
+                            activebackground="#106EBE",
+                            width=2
+                        ).pack(side=tk.RIGHT)
+                        self.update_zeal_button()
+                    elif command_or_id == "beta_checkbox":
+                        tk.Checkbutton(
+                            item_frame,
+                            text=label,
+                            variable=self.prefer_beta,
+                            command=self.on_prefer_beta_change,
+                            fg="white",
+                            bg="black",
+                            selectcolor="black",
+                            activebackground="black",
+                            activeforeground="white",
+                            font=("Segoe UI", 10)
+                        ).pack(anchor="w")
+                    elif command_or_id == "quarmtool_install_button":
+                        qt_frame = tk.Frame(item_frame, bg="black")
+                        qt_frame.pack(fill=tk.X)
+                        self.quarmtool_update_button = tk.Button(
+                            qt_frame,
+                            text="QuarmTool (Version Unknown)",
+                            command=var_or_command,
+                            font=("Segoe UI", 10),
+                            fg="white",
+                            bg="#0078D4",
+                            activebackground="#106EBE"
+                        )
+                        self.quarmtool_update_button.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                        tk.Button(
+                            qt_frame,
+                            text="▼",
+                            command=lambda: self.show_version_dropdown("QuarmTool", qt_frame),
+                            font=("Segoe UI", 10),
+                            fg="white",
+                            bg="#0078D4",
+                            activebackground="#106EBE",
+                            width=2
+                        ).pack(side=tk.RIGHT)
+                        self.update_quarmtool_button()
+                    elif command_or_id == "quarmplus_install_button":
+                        qp_frame = tk.Frame(item_frame, bg="black")
+                        qp_frame.pack(fill=tk.X)
+                        self.quarmplus_update_button = tk.Button(
+                            qp_frame,
+                            text=f"Quarm+ ({APP_VERSION})",
+                            command=var_or_command,
+                            font=("Segoe UI", 10),
+                            fg="white",
+                            bg="#0078D4",
+                            activebackground="#106EBE"
+                        )
+                        self.quarmplus_update_button.pack(fill=tk.X)
+                        self.update_quarmplus_button()
+                    elif command_or_id == "patcher_button":
+                        self.patcher_button = tk.Button(item_frame, text="Install Quarm Patcher",
+                                                      command=var_or_command,
+                                                      font=("Segoe UI", 10), fg="white", bg="#0078D4",
+                                                      activebackground="#106EBE")
+                        self.patcher_button.pack(fill=tk.X, pady=2)
+                        self.update_patcher_button()
+                else:
+                    label, command = item
+                    button = tk.Button(content_frame, text=label, command=command,
+                                      font=("Segoe UI", 10), fg="white", bg="#0078D4",
+                                      activebackground="#106EBE")
+                    button.pack(fill=tk.X, pady=2)
+
+    def show_version_dropdown(self, app_name, parent_frame):
+        versions = self.zeal_versions if app_name == "Zeal" else self.quarmtool_versions
+        if not versions:
+            self.log_message(f"No versions available for {app_name} - Rate limit exceeded. Try again later.", "yellow")
+            return
+        
+        menu = tk.Menu(self, tearoff=0, bg="black", fg="white", font=("Segoe UI", 10))
+        current_version = self.ui_versions.get(app_name, {}).get("raw", None)
+        
+        for v in versions:
+            # Normalize versions by stripping 'v' prefix for comparison
+            v_normalized = v.lstrip("v")
+            current_version_normalized = current_version.lstrip("v") if current_version else None
+            # Add a star if this version matches the installed version
+            display_label = f"{v} *" if current_version_normalized and v_normalized == current_version_normalized else v
+            menu.add_command(label=display_label, command=lambda ver=v: self.select_version(app_name, ver))
+        
+        try:
+            dropdown_button = parent_frame.winfo_children()[-1]  # Last child is the "▼" button
+            x = dropdown_button.winfo_rootx()
+            y = dropdown_button.winfo_rooty() + dropdown_button.winfo_height()
+            menu.tk_popup(x, y)
+        except tk.TclError as e:
+            self.log_message(f"Error displaying dropdown for {app_name}: {str(e)}", "red")
+
+    def select_version(self, app_name, version):
+        if app_name == "Zeal":
+            self.selected_zeal_version.set(version)
+            self.update_zeal_button()
+        else:  # QuarmTool
+            self.selected_quarmtool_version.set(version)
+            self.update_quarmtool_button()
+
+    def should_show_update_button(self, ui_name):
+        zeal_dir = self.zeal_dir.get()
+        if not zeal_dir:
+            return False
+        
+        is_installed = self.is_ui_installed(ui_name, zeal_dir)
+        
+        if not is_installed:
+            return True
+        
+        current_version = self.ui_versions.get(ui_name, {}).get("normalized", "0.0.0")
+        
+        ui_urls = {
+            "Nillipuss UI 1080p": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest",
+            "Nillipuss UI 1440p": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest",
+            "Qrustle1080-Z5x": "https://github.com/user-attachments/files/17566105/Qrustle1080-Z5x.zip",
+            "Qrustle1440-Z5x": "https://github.com/user-attachments/files/17566110/Qrustle1440-Z5x.zip",
+            "DuxaUI": "https://github.com/LordDemonos/Quarm.Guide/blob/master/assets/duxaUI.7z?raw=true",
+            "qqui (Calmethar Edition)": "https://drive.google.com/uc?id=13aisHiN9kOkFJHywZnGUF0EfUOiq-jwx",
+            "FrankenPussUI": "https://api.github.com/repos/anotheregostar/FrankenPussUI/releases/latest"
+        }
+        
+        try:
+            if ui_name in ["qqui (Calmethar Edition)", "DuxaUI", "Qrustle1080-Z5x", "Qrustle1440-Z5x"]:
+                latest_version_raw = "1.0.0"
+            else:
+                response = requests.get(ui_urls[ui_name], timeout=5)
+                response.raise_for_status()
+                latest_version_raw = response.json().get("tag_name", "0.0.0")
+            
+            latest_version = self.normalize_version(latest_version_raw)
+            self.log_message(f"Checking update for {ui_name}: current_version={current_version}, latest_version={latest_version}", "yellow")
+            needs_update = version.parse(latest_version) > version.parse(current_version)
+            self.log_message(f"Update needed for {ui_name}: {needs_update}", "yellow")
+            return needs_update
+        except (requests.RequestException, version.InvalidVersion) as e:
+            self.log_message(f"Error checking version for {ui_name}: {str(e)}", "yellow")
+            return False  # Assume no update needed if we can't check
+
+    def center_window_with_padding(self):
+        self.update_idletasks()
+        width = self.winfo_width()
+        height = self.winfo_height()
+        x = (self.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.winfo_screenheight() // 2) - (height // 2)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+
+    def select_zeal_dir(self):
+        dir_path = filedialog.askdirectory(title="Select Zeal Directory")
+        if dir_path:
+            self.zeal_dir.set(dir_path)
+            self.save_settings()
+            eqgame_path = os.path.join(dir_path, "eqgame.exe")
+            if os.path.exists(eqgame_path):
+                self.log_message(f"Zeal directory set to: {dir_path}", "green")
+                for section_name, (header, content_frame) in self.section_frames.items():
+                    if section_name == "Directory Selection":
+                        for widget in content_frame.winfo_children():
+                            if isinstance(widget, tk.Button) and widget.cget("text") == "Select Zeal Directory":
+                                widget.config(bg="#0078D4", fg="white", activebackground="#106EBE")
+            else:
+                self.log_message(f"Warning: {dir_path} does not contain eqgame.exe. Installation of Zeal or Quarm Patcher may fail.", "yellow")
+            self.update_zeal_button()
+            self.update_patcher_button()
+
+    def select_quarmtool_dir(self):
+        dir_path = filedialog.askdirectory(title="Select QuarmTool Directory")
+        if dir_path:
+            self.quarmtool_dir.set(dir_path)
+            self.save_settings()
+            self.log_message(f"QuarmTool directory set to: {dir_path}", "green")
+            self.update_quarmtool_button()
+
+    def run_quarmtool(self):
+        quarmtool_dir = self.quarmtool_dir.get()
+        if not quarmtool_dir:
+            self.log_message("Please set QuarmTool directory in Directory Selection.", "red")
+            return
+        
+        quarmtool_path = os.path.join(quarmtool_dir, "QuarmTool.exe")
+        if not os.path.exists(quarmtool_path):
+            self.log_message("QuarmTool.exe not found in the specified directory.", "red")
+            return
+        
+        self.log_message("Starting QuarmTool...")
+        self.update_progress(0)
+        try:
+            subprocess.Popen(quarmtool_path, cwd=quarmtool_dir)
+            self.log_message("Started QuarmTool", "green")
+        except Exception as e:
+            self.log_message(f"Error running QuarmTool: {str(e)}", "red")
+        finally:
+            self.update_progress(100)
+
+    def run_project_quarm(self):
+        zeal_dir = self.zeal_dir.get()
+        if not zeal_dir:
+            self.log_message("Please set Zeal directory in Directory Selection.", "red")
+            return
+        
+        eqgame_path = os.path.join(zeal_dir, "eqgame.exe")
+        if not os.path.exists(eqgame_path):
+            self.log_message("eqgame.exe not found in the selected directory.", "red")
+            return
+        
+        self.log_message("Starting Project Quarm...")
+        self.update_progress(0)
+        try:
+            subprocess.Popen(eqgame_path, cwd=zeal_dir)
+            self.log_message("Started Project Quarm", "green")
+        except Exception as e:
+            self.log_message(f"Error running Project Quarm: {str(e)}", "red")
+        finally:
+            self.update_progress(100)
+
+    def run_quarm_patcher(self):
+        zeal_dir = self.zeal_dir.get()
+        if not zeal_dir:
+            self.log_message("Please set Zeal directory in Directory Selection.", "red")
+            return
+        
+        patcher_path = os.path.join(zeal_dir, "eqemupatcher.exe")
+        if not os.path.exists(patcher_path):
+            self.log_message("Quarm server files are required to play. Please install and run the Quarm Patcher.", "red")
+            self.update_patcher_button()
+            return
+        
+        self.log_message("Starting Quarm Patcher...")
+        self.update_progress(0)
+        try:
+            subprocess.Popen(patcher_path, cwd=zeal_dir, creationflags=subprocess.CREATE_NO_WINDOW)
+            self.log_message("Started Quarm Patcher", "green")
+        except Exception as e:
+            self.log_message(f"Error running Quarm Patcher: {str(e)}", "red")
+        finally:
+            self.update_progress(100)
+
+    def check_and_install_updates(self):
+        if not self.zeal_dir.get():
+            self.log_message("Please set Zeal directory in Directory Selection.", "red")
+            return
+
+        self.log_message("Checking for updates...", "white")
+        self.update_progress(0)
+        try:
+            # Ensure we have the latest version data
+            if not hasattr(self, 'zeal_versions') or not self.zeal_versions:
+                self.initial_version_check()
+            
+            updates = []
+
+            # Zeal update check
+            if not self.is_zeal_installed():
+                if "Zeal" in self.ui_versions:
+                    del self.ui_versions["Zeal"]
+                    self.save_settings()
+                if "zeal_versions" in self.version_cache:
+                    del self.version_cache["zeal_versions"]
+                updates.append("Zeal")
+                # Set to latest version if not installed
+                zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("iamclint/Zeal"))
+                self.zeal_versions = zeal_data["full"] + zeal_data["beta"]
+                self.latest_full = zeal_data["full"][0] if zeal_data["full"] else "Unknown"
+                self.latest_beta = zeal_data["beta"][0] if zeal_data["beta"] else None
+                latest_zeal = self.latest_beta if self.prefer_beta.get() and self.latest_beta else self.latest_full
+                self.selected_zeal_version.set(latest_zeal if latest_zeal != "Unknown" else "Unknown")
+            else:
+                zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("iamclint/Zeal"))
+                self.zeal_versions = zeal_data["full"] + zeal_data["beta"]
+                self.latest_full = zeal_data["full"][0] if zeal_data["full"] else "Unknown"
+                self.latest_beta = zeal_data["beta"][0] if zeal_data["beta"] else None
+                latest_zeal = self.latest_beta if self.prefer_beta.get() and self.latest_beta else self.latest_full
+                current_zeal = self.ui_versions.get("Zeal", {}).get("normalized", "0.0.0")
+                current_zeal_raw = self.ui_versions.get("Zeal", {}).get("raw", "0.0.0")
+
+                if latest_zeal and latest_zeal != "Unknown":
+                    latest_zeal_normalized = self.normalize_version(latest_zeal)
+                    if self.prefer_beta.get() and self.latest_beta:
+                        if version.parse(latest_zeal_normalized) > version.parse(current_zeal):
+                            updates.append("Zeal")
+                            self.selected_zeal_version.set(latest_zeal)  # Set to latest version
+                    elif not self.prefer_beta.get() and self.latest_full:
+                        if version.parse(latest_zeal_normalized) > version.parse(current_zeal):
+                            updates.append("Zeal")
+                            self.selected_zeal_version.set(latest_zeal)  # Set to latest version
+                    else:
+                        self.selected_zeal_version.set(current_zeal_raw)  # Keep installed version if no update
+
+            # QuarmTool update check
+            if not self.is_quarmtool_installed():
+                if "QuarmTool" in self.ui_versions:
+                    del self.ui_versions["QuarmTool"]
+                    self.save_settings()
+                if "quarmtool_versions" in self.version_cache:
+                    del self.version_cache["quarmtool_versions"]
+                updates.append("QuarmTool")
+                # Set to latest version if not installed
+                self.quarmtool_versions = self.get_cached_version("quarmtool_versions", lambda: self.fetch_versions("EJWellman/QuarmTool"))
+                latest_qt = self.quarmtool_versions[0] if self.quarmtool_versions else "Unknown"
+                self.selected_quarmtool_version.set(latest_qt if latest_qt != "Unknown" else "Unknown")
+            else:
+                self.quarmtool_versions = self.get_cached_version("quarmtool_versions", lambda: self.fetch_versions("EJWellman/QuarmTool"))
+                current_qt = self.ui_versions.get("QuarmTool", {}).get("normalized", "0.0.0")
+                current_qt_raw = self.ui_versions.get("QuarmTool", {}).get("raw", "0.0.0")
+                latest_qt = self.quarmtool_versions[0] if self.quarmtool_versions else "Unknown"
+
+                if latest_qt and latest_qt != "Unknown":
+                    latest_qt_normalized = self.normalize_version(latest_qt)
+                    if version.parse(latest_qt_normalized) > version.parse(current_qt):
+                        updates.append("QuarmTool")
+                        self.selected_quarmtool_version.set(latest_qt)  # Set to latest version
+                    else:
+                        self.selected_quarmtool_version.set(current_qt_raw)  # Keep installed version if no update
+
+            # Quarm+ update check
+            response = requests.get("https://api.github.com/repos/blastlaster/QuarmPlus/releases/latest", timeout=5)
+            if response.status_code == 200:
+                latest_version = response.json()['tag_name']
+                self.quarmplus_version_var.set(latest_version)
+                if version.parse(latest_version) > version.parse(APP_VERSION):
+                    updates.append("Quarm+")
+
+            # Log the update status
+            if updates:
+                update_message = "Update(s) available for " + ", ".join(updates) + " - Click the yellow button(s) under 'Install/Update' to update."
+                self.log_message(update_message, "#ADD8E6")
+            else:
+                self.log_message("All apps are up to date!", "green")
+
+        except Exception as e:
+            self.log_message(f"Error checking updates: {str(e)}", "red")
+        finally:
+            self.update_progress(100)
+            self.update_zeal_button()
+            self.update_quarmtool_button()
+            self.update_quarmplus_button()
+            self.update_patcher_button()
+            self.update_ui_selection()
+
+    def check_zeal_updates(self):
+        if not self.zeal_dir.get():
+            self.log_message("Please set Zeal directory in Directory Selection.", "red")
+            return
+
+        self.log_message("Checking for Zeal updates...", "white")
+        self.update_progress(0)
+        try:
+            if not hasattr(self, 'zeal_versions') or not self.zeal_versions:
+                self.initial_version_check()
+            versions = self.zeal_versions  # Define versions explicitly
+            if not versions:
+                self.log_message("No versions available for Zeal - Rate limit exceeded. Try again later.", "yellow")
+                return
+
+            updates = []
+
+            if not self.is_zeal_installed():
+                updates.append("Zeal")
+            else:
+                zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("iamclint/Zeal"))
+                if zeal_data["full"]:
+                    current_zeal_raw = self.ui_versions.get("Zeal", {}).get("raw", "0.0.0")
+                    current_zeal_normalized = self.ui_versions.get("Zeal", {}).get("normalized", "0.0.0")
+                    # Update instance variables
+                    self.latest_full = zeal_data["full"][0] if zeal_data["full"] else "Unknown"
+                    self.latest_beta = zeal_data["beta"][0] if zeal_data["beta"] else None
+
+                    target_latest = self.latest_beta if self.prefer_beta.get() and self.latest_beta else self.latest_full
+                    is_installed_beta = "-beta" in current_zeal_raw.lower() if current_zeal_raw else False
+
+                    if self.prefer_beta.get():
+                        if self.latest_beta:
+                            if version.parse(self.normalize_version(self.latest_beta)) > version.parse(current_zeal_normalized):
+                                updates.append("Zeal")
+                    else:
+                        if self.latest_full:
+                            if is_installed_beta or version.parse(self.normalize_version(self.latest_full)) > version.parse(current_zeal_normalized):
+                                updates.append("Zeal")
+
+                    self.selected_zeal_version.set(target_latest)
+
+            if updates:
+                update_message = "Update(s) available for Zeal! -- Select most recent version under 'Install/Update' and click to update."
+                self.log_message(update_message, "#ADD8E6")
+            else:
+                self.log_message("Zeal is up to date.", "green")
+
+        except Exception as e:
+            self.log_message(f"Error checking Zeal updates: {str(e)}", "red")
+        finally:
+            self.update_progress(100)
+            self.update_zeal_button()
+
+    def on_prefer_beta_change(self):
+        zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("iamclint/Zeal"))
+        latest_full = zeal_data["full"][0] if zeal_data["full"] else "Unknown"
+        latest_beta = zeal_data["beta"][0] if zeal_data["beta"] else None
+        latest_zeal = latest_beta if self.prefer_beta.get() and latest_beta else latest_full
+        
+        # Update selected_zeal_version to the latest version based on preference
+        self.selected_zeal_version.set(latest_zeal)
+        self.check_zeal_updates()  # Update the UI with the new latest version info
+        self.update_zeal_button()  # Refresh the button state
+
+    def get_cached_version(self, cache_key, fetch_func):
+        if cache_key in self.version_cache:
+            cached_version, timestamp = self.version_cache[cache_key]
+            if time.time() - timestamp < CACHE_DURATION:
+                return cached_version
+        try:
+            versions = fetch_func()
+            if versions:
+                self.version_cache[cache_key] = (versions, time.time())
+            return versions
+        except Exception as e:
+            self.log_message(f"Error fetching versions for {cache_key}: {str(e)}", "red")
+            return [] if cache_key != "zeal_versions" else {"full": [], "beta": []}
+
+    def fetch_versions(self, repo):
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(f"https://api.github.com/repos/{repo}/releases", timeout=5)
+                if response.status_code == 200:
+                    releases = response.json()
+                    if repo == "iamclint/Zeal":
+                        full_releases = [release['tag_name'] for release in releases if "beta" not in release['tag_name'].lower()]
+                        beta_releases = [release['tag_name'] for release in releases if "beta" in release['tag_name'].lower()]
+                        return {"full": full_releases, "beta": beta_releases}
+                    else:
+                        # For QuarmTool, return the raw tag names as a list
+                        return [release['tag_name'] for release in releases]
+                elif response.status_code == 403:
+                    self.log_message(f"GitHub API rate limit exceeded for {repo}. Please try again later.", "red")
+                    return [] if repo != "iamclint/Zeal" else {"full": [], "beta": []}
+                elif response.status_code == 404:
+                    self.log_message(f"Repository {repo} not found on GitHub.", "red")
+                    return [] if repo != "iamclint/Zeal" else {"full": [], "beta": []}
+                else:
+                    self.log_message(f"Failed to fetch versions for {repo}: Status {response.status_code}", "yellow")
+                    return [] if repo != "iamclint/Zeal" else {"full": [], "beta": []}
+            except requests.Timeout:
+                self.log_message(f"Timeout while fetching versions for {repo} (Attempt {attempt + 1}/{max_retries})", "yellow")
+                if attempt == max_retries - 1:
+                    self.log_message(f"Max retries reached. Could not fetch versions for {repo}.", "red")
+                    return [] if repo != "iamclint/Zeal" else {"full": [], "beta": []}
+            except requests.RequestException as e:
+                self.log_message(f"Error fetching versions for {repo} (Attempt {attempt + 1}/{max_retries}): {str(e)}", "yellow")
+                if attempt == max_retries - 1:
+                    self.log_message(f"Max retries reached. Could not fetch versions for {repo}.", "red")
+                    return [] if repo != "iamclint/Zeal" else {"full": [], "beta": []}
+            time.sleep(2 ** attempt)
+        return [] if repo != "iamclint/Zeal" else {"full": [], "beta": []}
+
+    def normalize_version(self, version_str):
+        if not isinstance(version_str, str):
+            self.log_message(f"Error: normalize_version expected a string, got {type(version_str)}: {version_str}", "red")
+            return "0.0.0"
+        if not version_str or version_str in ["Unknown", "Loading...", "Latest"]:
+            return "0.0.0"
+        
+        # Split into base version and suffix (e.g., "0.6.6-beta1" -> ["0.6.6", "beta1"])
+        parts = version_str.split('-', 1)
+        base_version = parts[0].lstrip('v')  # Remove leading 'v' if present
+        numeric_part = re.sub(r'[^0-9.]', '', base_version)  # Extract numeric part
+        version_parts = numeric_part.split('.')
+        while len(version_parts) < 3:
+            version_parts.append('0')
+        
+        # Handle Zeal beta versions
+        if len(parts) > 1 and 'beta' in parts[1].lower():
+            # Extract beta number (e.g., "beta1" -> "1")
+            beta_suffix = parts[1].lower().replace('beta', '')
+            try:
+                beta_num = int(re.sub(r'[^0-9]', '', beta_suffix))  # Extract numeric part of beta
+                # Append beta number to patch version (e.g., "0.6.6" with beta1 -> "0.6.61")
+                version_parts[2] = f"{int(version_parts[2])}{beta_num:01d}"
+            except ValueError:
+                # If beta number isn't valid, treat it as non-beta
+                pass
+        
+        return '.'.join(version_parts)
+
+    def download_with_retry(self, url, path, max_retries=3):
+        for attempt in range(max_retries):
+            try:
+                self.log_message(f"Downloading from {url} (Attempt {attempt + 1}/{max_retries})", "white")
+                self.update_progress(0)
+                response = requests.get(url, stream=True, timeout=5)
+                if response.status_code != 200:
+                    self.log_message(f"Download failed with status {response.status_code}: {response.text}", "red")
+                    raise requests.exceptions.RequestException(f"Status {response.status_code}")
+
+                total_size = int(response.headers.get('content-length', 0))
+                block_size = 8192
+                downloaded_size = 0
+
+                with open(path, 'wb') as file:
+                    for chunk in response.iter_content(chunk_size=block_size):
+                        if chunk:
+                            file.write(chunk)
+                            downloaded_size += len(chunk)
+                            if total_size > 0:
+                                progress = (downloaded_size / total_size) * 100
+                                self.update_progress(progress)
+
+                self.log_message(f"Successfully downloaded to {path}", "green")
+                return True
+
+            except requests.exceptions.RequestException as e:
+                self.log_message(f"Download attempt {attempt + 1} failed: {str(e)}", "red")
+                if attempt == max_retries - 1:
+                    self.log_message(f"Max retries reached. Download failed for {url}.", "red")
+                    return False
+                wait_time = 2 ** attempt
+                self.log_message(f"Retrying in {wait_time} seconds...", "white")
+                time.sleep(wait_time)
+
+        return False
+
+    def preserve_ui_directories(self, zeal_dir):
+        preserved_ui_dirs = {}
+        uifiles_dir = os.path.join(zeal_dir, "uifiles")
+        if os.path.exists(uifiles_dir):
+            for item in os.listdir(uifiles_dir):
+                item_path = os.path.join(uifiles_dir, item)
+                if os.path.isdir(item_path):
+                    temp_path = os.path.join(zeal_dir, f"temp_ui_{item}")
+                    shutil.move(item_path, temp_path)
+                    preserved_ui_dirs[item] = temp_path
+        return preserved_ui_dirs
+
+    def restore_ui_directories(self, zeal_dir, preserved_ui_dirs):
+        uifiles_dir = os.path.join(zeal_dir, "uifiles")
+        os.makedirs(uifiles_dir, exist_ok=True)
+        for ui_name, temp_path in preserved_ui_dirs.items():
+            dest_path = os.path.join(uifiles_dir, ui_name)
+            if os.path.exists(dest_path):
+                shutil.rmtree(dest_path)
+            shutil.move(temp_path, dest_path)
+
+    def update_zeal(self):
+        zeal_dir = self.zeal_dir.get()
+        if not zeal_dir:
+            self.log_message("Please set Zeal directory in Directory Selection.", "red")
+            return
+        
+        selected_version = self.selected_zeal_version.get()
+        
+        if selected_version in ["Unknown", "Loading..."] or not selected_version:
+            self.log_message("Cannot determine Zeal version to install.", "red")
+            self.update_zeal_button()
+            return
+        
+        if not self.is_zeal_installed():
+            self.log_message("Zeal is not fully installed. Starting fresh installation...", "yellow")
+            if "Zeal" in self.ui_versions:
+                del self.ui_versions["Zeal"]
+                self.save_settings()
+                self.log_message("Cleared Zeal version from settings due to missing files", "yellow")
+
+        self.log_message(f"Installing Zeal version {selected_version}...")
+        self.update_progress(0)
+        
+        zeal_updated = self.check_and_update("Zeal", selected_version, "iamclint/Zeal", zeal_dir)
+        if zeal_updated:
+            if self.is_zeal_installed():
+                # Ensure raw version does not have 'v' prefix
+                raw_version = selected_version.lstrip("v")
+                self.ui_versions["Zeal"] = {
+                    "normalized": self.normalize_version(selected_version),
+                    "raw": raw_version
+                }
+                self.selected_zeal_version.set(raw_version)
+                self.save_settings()
+                self.log_message(f"Updated Zeal to version {selected_version}", "green")
+            else:
+                self.log_message("Zeal update succeeded but required files are missing. Installation incomplete.", "red")
+        else:
+            self.log_message("Zeal update failed. See logs for details.", "red")
+        self.update_progress(100)
+        self.update_zeal_button()
+
+    def update_quarmtool(self):
+        quarmtool_dir = self.quarmtool_dir.get()
+        if not quarmtool_dir:
+            self.log_message("Please set QuarmTool directory in Directory Selection.", "red")
+            return
+        
+        selected_version = self.selected_quarmtool_version.get()
+        
+        if selected_version in ["Unknown", "Loading..."] or not selected_version:
+            self.log_message("Cannot determine QuarmTool version to install.", "red")
+            self.update_quarmtool_button()
+            return
+        
+        if not self.is_quarmtool_installed():
+            self.log_message("QuarmTool is not fully installed. Starting fresh installation...", "yellow")
+            if "QuarmTool" in self.ui_versions:
+                del self.ui_versions["QuarmTool"]
+                self.save_settings()
+                self.log_message("Cleared QuarmTool version from settings due to missing files", "yellow")
+
+        self.log_message(f"Installing QuarmTool version {selected_version}...")
+        self.update_progress(0)
+        
+        quarmtool_updated = self.check_and_update("QuarmTool", selected_version, "EJWellman/QuarmTool", quarmtool_dir)
+        
+        if quarmtool_updated:
+            # Ensure raw version does not have 'v' prefix
+            raw_version = selected_version.lstrip("v")
+            self.ui_versions["QuarmTool"] = {
+                "normalized": self.normalize_version(selected_version),
+                "raw": raw_version
+            }
+            self.selected_quarmtool_version.set(raw_version)
+            self.save_settings()
+            self.log_message(f"Updated QuarmTool to version {selected_version}", "green")
+            self.update_quarmtool_button()
+        else:
+            self.log_message("QuarmTool update failed.", "yellow")
+        self.update_progress(100)
+        self.update_quarmtool_button()
+
+    def update_quarmplus(self):
+        url = "https://github.com/blastlaster/QuarmPlus/releases/latest"
+        self.clipboard_clear()
+        self.clipboard_append(url)
+        self.clipboard_append("")
+        self.log_message("Copied Quarm+ latest version URL to clipboard! \nDownload newest Quarm+.exe, then replace this version to update.", "green")
+        self.update_quarmplus_button()
+
+    def install_quarm_patcher(self):
+        zeal_dir = self.zeal_dir.get()
+        if not zeal_dir:
+            self.log_message("Please set Zeal directory in Directory Selection.", "red")
+            return
+        
+        eqgame_path = os.path.join(zeal_dir, "eqgame.exe")
+        if not os.path.exists(eqgame_path):
+            message = "Quarm Patcher must be installed in an EverQuest directory.\nInstallation terminated, please adjust Zeal directory."
+            CustomMessageBox(self, "Installation Error", message)
+            self.log_message(message, "red")
+            for section_name, (header, content_frame) in self.section_frames.items():
+                if section_name == "Directory Selection":
+                    for widget in content_frame.winfo_children():
+                        if isinstance(widget, tk.Button) and widget.cget("text") == "Select Zeal Directory":
+                            widget.config(bg="yellow", fg="black", activebackground="yellow")
+            return
+        
+        if self.is_quarm_patcher_installed():
+            self.log_message("Quarm Patcher is already installed.", "green")
+            self.update_patcher_button()
+            return
+        
+        self.log_message("Installing Quarm Patcher...", "white")
+        self.update_progress(0)
+        
+        try:
+            download_url = "https://github.com/blastlaster/pqdi4all/releases/download/0.2/QuarmPatcher.zip"
+            download_path = os.path.join(zeal_dir, "quarm_patcher.zip")
+            
+            if self.download_with_retry(download_url, download_path):
+                self.log_message("Extracting Quarm Patcher...", "white")
+                self.update_progress(0)
+                with zipfile.ZipFile(download_path, 'r') as zip_ref:
+                    zip_ref.extractall(zeal_dir)
+                    self.update_progress(50)
+                
+                os.remove(download_path)
+                self.update_progress(100)
+                self.log_message("Successfully installed Quarm Patcher", "green")
+            else:
+                self.log_message("Failed to download Quarm Patcher", "red")
+        
+        except Exception as e:
+            self.log_message(f"Error installing Quarm Patcher: {str(e)}", "red")
+        finally:
+            self.update_patcher_button()
+
+    def install_ui_files_for_update(self, ui_name):
+        zeal_dir = self.zeal_dir.get()
+        if not zeal_dir:
+            self.log_message("Please set Zeal directory in Directory Selection.", "red")
+            return
+        
+        ui_files = {
+            "Nillipuss UI 1080p": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest",
+            "Nillipuss UI 1440p": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest",
+            "Qrustle1080-Z5x": "https://github.com/user-attachments/files/17566105/Qrustle1080-Z5x.zip",
+            "Qrustle1440-Z5x": "https://github.com/user-attachments/files/17566110/Qrustle1440-Z5x.zip",
+            "DuxaUI": "https://github.com/LordDemonos/Quarm.Guide/blob/master/assets/duxaUI.7z?raw=true",
+            "qqui (Calmethar Edition)": "https://github.com/blastlaster/pqdi4all/releases/download/0.2/qqui_CalmetharEd.zip",
+            "FrankenPussUI": "https://api.github.com/repos/anotheregostar/FrankenPussUI/releases/latest"
+        }
+        
+        self.log_message(f"Checking {ui_name}...", "white")
+        self.update_progress(0)
+        
+        try:
+            download_path = os.path.join(zeal_dir, "uifiles")
+            os.makedirs(download_path, exist_ok=True)
+            
+            download_url = ui_files.get(ui_name)
+            if not download_url:
+                self.log_message(f"No download URL for {ui_name}", "red")
+                return
+            
+            is_installed = self.is_ui_installed(ui_name, zeal_dir)
+            current_version = self.ui_versions.get(ui_name, {}).get("normalized", "0.0.0")
+            
+            if ui_name not in ["qqui (Calmethar Edition)", "DuxaUI", "Qrustle1080-Z5x", "Qrustle1440-Z5x"]:
+                response = requests.get(download_url, timeout=5)
+                if response.status_code != 200:
+                    self.log_message(f"Failed to fetch release info for {ui_name}: Status {response.status_code}", "red")
+                    return
+                response.raise_for_status()
+                release_data = response.json()
+                download_url = release_data['assets'][0]['browser_download_url']
+                file_extension = ".zip"
+                latest_version_raw = release_data.get("tag_name", "0.0.0")
+            else:
+                latest_version_raw = "1.0.0"
+                if ui_name == "DuxaUI":
+                    download_url = ui_files[ui_name]
+                    file_extension = ".7z"
+                elif ui_name == "qqui (Calmethar Edition)":
+                    download_url = ui_files[ui_name]
+                    file_extension = ".zip"
+                else:
+                    download_url = ui_files[ui_name]
+                    file_extension = ".zip"
+            
+            latest_version = self.normalize_version(latest_version_raw)
+            
+            # Update ui_versions before starting the operation
+            if ui_name not in self.ui_versions or (is_installed and version.parse(latest_version) > version.parse(current_version)):
+                self.ui_versions[ui_name] = {
+                    "raw": latest_version_raw,
+                    "normalized": latest_version
+                }
+                self.save_settings()
+                self.log_message(f"Updated ui_versions for {ui_name}: {self.ui_versions[ui_name]}", "yellow")
+            
+            # If not in ui_versions but installed, we've already updated it above
+            if is_installed and ui_name not in self.ui_versions:
+                self.log_message(f"Initialized version for {ui_name} in ui_versions", "yellow")
+                self.update_ui_selection()
+                return
+            
+            if is_installed and version.parse(latest_version) <= version.parse(current_version):
+                self.log_message(f"Latest version of {ui_name} is already installed.", "green")
+                self.update_progress(100)
+                return
+            
+            self.log_message(f"Updating {ui_name}...", "white")
+            
+            download_path_file = os.path.join(download_path, f"{ui_name}{file_extension}")
+            
+            if self.download_with_retry(download_url, download_path_file):
+                self.log_message(f"Extracting {ui_name}...")
+                self.update_progress(0)
+                temp_extract_path = os.path.join(zeal_dir, "uifiles_temp")
+                os.makedirs(temp_extract_path, exist_ok=True)
+                if file_extension == ".7z":
+                    with py7zr.SevenZipFile(download_path_file, mode='r') as z:
+                        z.extractall(temp_extract_path)
+                else:
+                    with zipfile.ZipFile(download_path_file, 'r') as zip_ref:
+                        zip_ref.extractall(temp_extract_path)
+                
+                extracted_items = os.listdir(temp_extract_path)
+                if extracted_items:
+                    extracted_folder = os.path.join(temp_extract_path, extracted_items[0])
+                    if ui_name == "qqui (Calmethar Edition)":
+                        target_folder = os.path.join(download_path, "qqui_CalmetharEd")
+                    else:
+                        target_folder = os.path.join(download_path, ui_name)
+                    if os.path.exists(target_folder):
+                        shutil.rmtree(target_folder)
+                    shutil.move(extracted_folder, target_folder)
+                
+                shutil.rmtree(temp_extract_path, ignore_errors=True)
+                os.remove(download_path_file)
+                self.update_progress(50)
+                
+                self.delete_unwanted_ui_folders(zeal_dir)
+                
+                if ui_name in ["Qrustle1080-Z5x", "Qrustle1440-Z5x"]:
+                    problematic_file = os.path.join(download_path, ui_name, "EQUI_ShortDurationBuffWindow.xml")
+                    if os.path.exists(problematic_file):
+                        os.remove(problematic_file)
+                        self.log_message(f"Removed problematic EQUI_ShortDurationBuffWindow.xml from {ui_name}", "yellow")
+                    else:
+                        self.log_message(f"EQUI_ShortDurationBuffWindow.xml not found in {ui_name}", "yellow")
+                
+                self.update_progress(100)
+                self.log_message(f"Updated {ui_name}", "green")
+            
+            self.delete_equi_options_window(zeal_dir)
+            self.save_settings()
+            self.update_ui_selection()
+        
+        except Exception as e:
+            self.log_message(f"Error updating {ui_name}: {str(e)}", "red")
+            # Ensure settings are saved even on failure
+            self.save_settings()
+
+    def is_ui_installed(self, ui_name, zeal_dir):
+        if not zeal_dir:
+            return False
+        base_path = os.path.join(zeal_dir, "uifiles")
+        ui_variants = {
+            "Nillipuss UI 1080p": ["Nillipuss UI 1080p", "NillipussUI_1080p"],
+            "Nillipuss UI 1440p": ["Nillipuss UI 1440p", "NillipussUI_1440p"],
+            "FrankenPussUI": ["FrankenPussUI"],
+            "Qrustle1080-Z5x": ["Qrustle1080-Z5x"],
+            "Qrustle1440-Z5x": ["Qrustle1440-Z5x"],
+        }.get(ui_name, [ui_name])
+        for variant in ui_variants:
+            ui_path = os.path.join(base_path, variant)
+            if os.path.isdir(ui_path) and len(os.listdir(ui_path)) > 0:
+                return True
+        return False
+
+    def is_zeal_installed(self):
+        zeal_dir = self.zeal_dir.get()
+        if not zeal_dir:
+            return False
+        required_files = ["zeal.asi", "eqgame.exe"]  # Require only zeal.asi and eqgame.exe
+        return all(os.path.exists(os.path.join(zeal_dir, file)) for file in required_files)
+
+    def is_quarmtool_installed(self):
+        quarmtool_dir = self.quarmtool_dir.get()
+        if not quarmtool_dir:
+            return False
+        return os.path.exists(os.path.join(quarmtool_dir, "QuarmTool.exe"))
+
+    def is_quarm_patcher_installed(self):
+        zeal_dir = self.zeal_dir.get()
+        if not zeal_dir:
+            return False
+        return os.path.exists(os.path.join(zeal_dir, "eqemupatcher.exe"))
+
+    def check_and_update(self, app_name, version, repo, install_dir):
+        self.log_message(f"Checking {app_name} version {version} from {repo}...", "white")
+        self.update_progress(0)
+        try:
+            # Construct the GitHub API URL
+            if version == "Latest":
+                url = f"https://api.github.com/repos/{repo}/releases/latest"
+            else:
+                url = f"https://api.github.com/repos/{repo}/releases/tags/{version}"
+            self.log_message(f"Fetching release info from {url}...", "white")
+
+            # Fetch release info
+            response = requests.get(url, timeout=5)
+            if response.status_code != 200:
+                self.log_message(f"Failed to fetch {app_name} release info: Status {response.status_code} - Response: {response.text}", "red")
+                return False
+
+            latest_release = response.json()
+            if not latest_release.get('assets'):
+                self.log_message(f"No assets found in release for {app_name} version {version}", "red")
+                return False
+
+            download_url = latest_release['assets'][0]['browser_download_url']
+            download_path = os.path.join(install_dir, f"{app_name.lower()}_{version}.zip")
+            self.log_message(f"Downloading {app_name} from {download_url}...", "white")
+
+            # Download the release
+            if not self.download_with_retry(download_url, download_path):
+                self.log_message(f"Failed to download {app_name} after retries", "red")
+                return False
+
+            self.log_message(f"Extracting {app_name} to {install_dir}...", "white")
+            self.update_progress(0)
+
+            # Preserve existing UI directories (excluding uifiles/zeal) and TGA files before extraction, but only for Zeal
+            preserved_ui_dirs = {}
+            preserved_tga_files = {}
+            if app_name == "Zeal":
+                uifiles_dir = os.path.join(install_dir, "uifiles")
+                if os.path.exists(uifiles_dir):
+                    for item in os.listdir(uifiles_dir):
+                        item_path = os.path.join(uifiles_dir, item)
+                        # Skip preserving the 'zeal' folder; it will be replaced by the new install
+                        if os.path.isdir(item_path) and item != "zeal":
+                            temp_path = os.path.join(install_dir, f"temp_ui_{item}")
+                            shutil.move(item_path, temp_path)
+                            preserved_ui_dirs[item] = temp_path
+                preserved_tga_files = self.preserve_custom_tga_files(install_dir)
+
+            # Extract to a temporary directory
+            temp_extract_path = os.path.join(install_dir, f"temp_extract_{app_name}_{version}")
+            os.makedirs(temp_extract_path, exist_ok=True)
+            try:
+                with zipfile.ZipFile(download_path, 'r') as zip_ref:
+                    zip_ref.extractall(temp_extract_path)
+                    self.update_progress(40)
+            except zipfile.BadZipFile as e:
+                self.log_message(f"Failed to extract {app_name}: Bad ZIP file - {str(e)}", "red")
+                shutil.rmtree(temp_extract_path, ignore_errors=True)
+                os.remove(download_path)
+                return False
+
+            # Check extracted contents
+            extracted_items = os.listdir(temp_extract_path)
+            self.log_message(f"Extracted items: {extracted_items}", "white")
+            if len(extracted_items) == 1 and os.path.isdir(os.path.join(temp_extract_path, extracted_items[0])):
+                # Move contents from the subdirectory to install_dir
+                subdir_path = os.path.join(temp_extract_path, extracted_items[0])
+                for item in os.listdir(subdir_path):
+                    src_path = os.path.join(subdir_path, item)
+                    dest_path = os.path.join(install_dir, item)
+                    self.log_message(f"Moving {src_path} to {dest_path}...", "white")
+                    if os.path.exists(dest_path):
+                        if os.path.isdir(dest_path):
+                            shutil.rmtree(dest_path)
+                        else:
+                            os.remove(dest_path)
+                    shutil.move(src_path, dest_path)
+            else:
+                # Move contents directly to install_dir
+                for item in extracted_items:
+                    src_path = os.path.join(temp_extract_path, item)
+                    dest_path = os.path.join(install_dir, item)
+                    self.log_message(f"Moving {src_path} to {dest_path}...", "white")
+                    if os.path.exists(dest_path):
+                        if os.path.isdir(dest_path):
+                            shutil.rmtree(dest_path)
+                        else:
+                            os.remove(dest_path)
+                    shutil.move(src_path, dest_path)
+
+            # Clean up the temporary extraction directory and downloaded ZIP
+            shutil.rmtree(temp_extract_path, ignore_errors=True)
+            os.remove(download_path)
+            self.update_progress(60)
+
+            # Restore preserved UI directories (custom UIs) and TGA files, but only for Zeal
+            if app_name == "Zeal":
+                self.restore_ui_directories(install_dir, preserved_ui_dirs)
+                self.restore_custom_tga_files(install_dir, preserved_tga_files)
+            self.update_progress(80)
+
+            # Verify extracted files
+            if app_name == "Zeal":
+                required_files = ["eqgame.exe", "eqclient.ini", "uifiles", "Zeal.asi"]
+                missing_files = [f for f in required_files if not os.path.exists(os.path.join(install_dir, f))]
+                if missing_files:
+                    self.log_message(f"Missing required files after extraction: {missing_files}", "red")
+                    return False
+                # Additional check for uifiles/zeal
+                zeal_ui_path = os.path.join(install_dir, "uifiles", "zeal")
+                if not os.path.exists(zeal_ui_path):
+                    self.log_message("uifiles/zeal folder is missing after installation", "yellow")
+
+            self.update_progress(100)
+            self.log_message(f"Successfully updated {app_name}", "green")
+            return True
+
+        except requests.RequestException as e:
+            self.log_message(f"Network error while updating {app_name}: {str(e)}", "red")
+            return False
+        except Exception as e:
+            self.log_message(f"Unexpected error updating {app_name}: {str(e)}", "red")
+            return False
+
+    def preserve_custom_tga_files(self, zeal_dir):
+        preserved_files = {}
+        tga_dir = os.path.join(zeal_dir, "uifiles")
+        if os.path.exists(tga_dir):
+            for root, _, files in os.walk(tga_dir):
+                for file in files:
+                    if file.lower().endswith('.tga'):
+                        file_path = os.path.join(root, file)
+                        # Store relative path from uifiles to preserve subdirectory structure
+                        relative_path = os.path.relpath(file_path, tga_dir)
+                        temp_path = os.path.join(zeal_dir, f"temp_tga_{relative_path.replace(os.sep, '_')}")
+                        shutil.move(file_path, temp_path)
+                        preserved_files[relative_path] = temp_path
+        return preserved_files
+
+    def restore_custom_tga_files(self, zeal_dir, preserved_files):
+        tga_dir = os.path.join(zeal_dir, "uifiles")
+        os.makedirs(tga_dir, exist_ok=True)
+        for relative_path, temp_path in preserved_files.items():
+            dest_path = os.path.join(tga_dir, relative_path)
+            # Ensure the target subdirectory exists
+            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+            shutil.move(temp_path, dest_path)
+
+    def delete_equi_options_window(self, zeal_dir):
+        eqclient_path = os.path.join(zeal_dir, "eqclient.ini")
+        if os.path.exists(eqclient_path):
+            config = configparser.ConfigParser()
+            config.optionxform = str
+            config.read(eqclient_path)
+            if config.has_section('Options'):
+                if config.has_option('Options', 'EQOptionsWindow'):
+                    config.remove_option('Options', 'EQOptionsWindow')
+                    with open(eqclient_path, 'w') as configfile:
+                        config.write(configfile)
+
+    def open_advanced_configurator(self):
+        zeal_dir = self.zeal_dir.get()
+        if not zeal_dir:
+            self.log_message("Please set Zeal directory in Directory Selection.", "red")
+            return
+        AdvancedConfiguratorWindow(self, zeal_dir)
+
+    def apply_wasd_shortcuts(self):
+        zeal_dir = self.zeal_dir.get()
+        if not zeal_dir:
+            self.log_message("Please set Zeal directory in Directory Selection.", "red")
+            return
+
+        eqclient_path = os.path.join(zeal_dir, 'eqclient.ini')
+        changes = []
+
+        self.log_message("Applying WASD shortcuts...", "white")
+        self.update_progress(0)
+        try:
+            if not os.access(zeal_dir, os.W_OK):
+                self.log_message("No write permission for Zeal directory.", "red")
+                return
+
+            config = configparser.ConfigParser()
+            config.optionxform = str
+
+            if os.path.exists(eqclient_path):
+                config.read(eqclient_path)
+            else:
+                self.log_message("eqclient.ini not found, creating new file.", "yellow")
+                config['KeyMaps'] = {}
+
+            if not config.has_section('KeyMaps'):
+                config.add_section('KeyMaps')
+
+            wasd_settings = {
+                'KEYMAP_FORWARD': 'w',
+                'KEYMAP_BACK': 's',
+                'KEYMAP_RIGHT': 'd',
+                'KEYMAP_LEFT': 'a',
+                'KEYMAP_AUTOPRIM': 'q',
+                'KEYMAP_DUCK': 'l',
+                'KEYMAP_AUTORUN': '\\',
+                'KEYMAP_CycleTargetNPC': 'TAB',
+                'KEYMAP_CycleTargetPC': 'F1',
+                'KEYMAP_CycleTargetFriendly': 'F2',
+                'KEYMAP_TARGETME': 'F3',
+                'KEYMAP_SIT_STAND': 'x',
+                'KEYMAP_JUMP': 'SPACE'
+            }
+
+            for key, value in wasd_settings.items():
+                if not config.has_option('KeyMaps', key) or config.get('KeyMaps', key) != value:
+                    config.set('KeyMaps', key, value)
+                    changes.append(f"{key} set to {value}")
+
+            if changes:
+                with open(eqclient_path, 'w') as configfile:
+                    config.write(configfile)
+                self.log_message("WASD shortcuts applied:\n" + "\n".join(changes), "green")
+            else:
+                self.log_message("WASD shortcuts already applied.", "green")
+
+        except PermissionError:
+            self.log_message("Permission denied while writing eqclient.ini.", "red")
+        except Exception as e:
+            self.log_message(f"Error applying WASD shortcuts: {str(e)}", "red")
+        finally:
+            self.update_progress(100)
+
+    def toggle_section(self, section_name):
+        header, content_frame = self.section_frames[section_name]
+        current_state = self.section_states.get(section_name, True)
+        new_state = not current_state
+        self.section_states[section_name] = new_state
+        
+        if new_state:
+            header.config(text=f"▼ {section_name}")
+            content_frame.pack(fill=tk.BOTH, expand=True)
+        else:
+            header.config(text=f"▶ {section_name}")
+            content_frame.pack_forget()
+        
+        self.save_settings()
+
+    def delete_uifiles_zeal(self, zeal_dir):
+        uifiles_dir = os.path.join(zeal_dir, "uifiles")
+        if os.path.exists(uifiles_dir):
+            for item in os.listdir(uifiles_dir):
+                item_path = os.path.join(uifiles_dir, item)
+                if os.path.isfile(item_path) and not item.lower().endswith('.tga'):
+                    os.remove(item_path)
+                elif os.path.isdir(item_path):
+                    shutil.rmtree(item_path, ignore_errors=True)
+
+    def optimize_settings(self):
+        zeal_dir = self.zeal_dir.get()
+        if not zeal_dir:
+            self.log_message("Please set Zeal directory in Directory Selection.", "red")
+            return
+
+        eqclient_path = os.path.join(zeal_dir, 'eqclient.ini')
+        zeal_ini_path = os.path.join(zeal_dir, 'Zeal.ini')
+
+        self.log_message("Optimizing settings...", "white")
+        self.update_progress(0)
+        try:
+            if not os.access(zeal_dir, os.W_OK):
+                self.log_message("No write permission for Zeal directory.", "red")
+                return
+
+            # Handle eqclient.ini optimization
+            config = configparser.ConfigParser()
+            config.optionxform = str
+
+            if os.path.exists(eqclient_path):
+                config.read(eqclient_path)
+            else:
+                self.log_message("eqclient.ini not found, creating new file.", "yellow")
+                config['VideoMode'] = {}
+                config['Defaults'] = {}
+                config['Options'] = {}
+
+            # Ensure all sections exist
+            for section in ['VideoMode', 'Defaults', 'Options']:
+                if not config.has_section(section):
+                    config.add_section(section)
+
+            # VideoMode settings
+            config.set('VideoMode', 'Width', '1920')
+            config.set('VideoMode', 'Height', '1080')
+            config.set('VideoMode', 'BitsPerPixel', '32')
+            config.set('VideoMode', 'RefreshRate', '60')
+
+            # Defaults settings
+            config.set('Defaults', 'NewUI', 'TRUE')
+            config.set('Defaults', 'OldUI', 'FALSE')
+            config.set('Defaults', 'TextureCache', 'FALSE')
+            config.set('Defaults', 'WindowedMode', 'FALSE')
+
+            # Options settings
+            config.set('Options', 'MaxFPS', '144')
+            config.set('Options', 'MaxBGFPS', '60')
+            config.set('Options', 'NoFPSLimiter', 'FALSE')
+
+            with open(eqclient_path, 'w') as configfile:
+                config.write(configfile)
+
+            # Check if Zeal is installed and optimize Zeal.ini
+            if self.is_zeal_installed():
+                zeal_config = configparser.ConfigParser()
+                zeal_config.optionxform = str
+                
+                # If Zeal.ini exists, read it first to preserve other sections
+                if os.path.exists(zeal_ini_path):
+                    zeal_config.read(zeal_ini_path)
+                
+                # Ensure [Zeal] section exists
+                if not zeal_config.has_section('Zeal'):
+                    zeal_config.add_section('Zeal')
+
+                # Define optimized Zeal settings
+                zeal_settings = {
+                    'PipeDelay': '100',
+                    'TooltipTime': '500',
+                    'alt_all_containers': 'FALSE',
+                    'NetstatVisibilityState': 'TRUE',
+                    'MapEnabled': 'TRUE',
+                    'MapInteractiveEnabled': 'TRUE',
+                    'MapExternalEnabled': 'FALSE',
+                    'MapDefaultToAutofade': 'FALSE',
+                    'MapExternalLeftOffset': '16',
+                    'MapExternalTopOffset': '16',
+                    'MapExternalWidth': '640',
+                    'MapExternalHeight': '640',
+                    'MapZoomDefaultIndex': '0',
+                    'MapShowRaid': 'TRUE',
+                    'MapShowGrid': 'FALSE',
+                    'MapGridPitch': '1000',
+                    'MapNameLength': '5',
+                    'MapDataMode': '0',
+                    'MapBackgroundState': '0',
+                    'MapBackgroundAlpha': '0.500000',
+                    'MapFadedZLevelAlpha': '0.200000',
+                    'MapAlignment': '0',
+                    'MapLabelsMode': '1',
+                    'MapShowGroupMode': '1',
+                    'MapPositionSize': '0.009999',
+                    'MapMarkerSize': '0.019999',
+                    'MapFontFilename': 'default',
+                    'SelfClickThru': 'FALSE',
+                    'Recasttimers': 'TRUE',
+                    'ChatTimestamps': '2',
+                    'BrownSkeletons': 'TRUE',
+                    'ClassicMusic': 'TRUE',
+                    'Fov': '55.000000',
+                    'MapShowPlayerHeadings': 'TRUE',
+                    'MapAddLocText': 'TRUE',
+                    'NameplateColors': 'FALSE',
+                    'NameplateConColors': 'TRUE',
+                    'NameplateTargetMarker': 'TRUE',
+                    'NameplateTargetHealth': 'TRUE',
+                    'NameplateAttackOnly': 'TRUE',
+                    'NamePlateDropShadow': 'TRUE',
+                    'NameplateHealthBars': 'TRUE',
+                    'NameplateManaBars': 'TRUE',
+                    'NameplateStaminaBars': 'FALSE',
+                    'NamePlateZealFonts': 'TRUE'
+                }
+
+                # Apply Zeal settings
+                for key, value in zeal_settings.items():
+                    zeal_config.set('Zeal', key, value)
+
+                # Ensure [CharacterSelect] section exists and set ZoneIndex
+                if not zeal_config.has_section('CharacterSelect'):
+                    zeal_config.add_section('CharacterSelect')
+                zeal_config.set('CharacterSelect', 'ZoneIndex', '54')
+
+                # Write Zeal.ini
+                with open(zeal_ini_path, 'w') as zealfile:
+                    zeal_config.write(zealfile)
+
+                self.log_message("EQ and Zeal Settings optimized successfully", "green")
+            else:
+                self.log_message("EQ Settings optimized successfully! \nZeal not installed; try again after installing.", "green")
+
+        except PermissionError:
+            self.log_message("Permission denied while writing configuration files.", "red")
+        except Exception as e:
+            self.log_message(f"Error optimizing settings: {str(e)}", "red")
+        finally:
+            self.update_progress(100)
+
+if __name__ == "__main__":
+    app = ModernLoadingScreen()
+    app.mainloop()
