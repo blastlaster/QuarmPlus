@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 import re
 
 settings_file = "settings.json"
-APP_VERSION = "v0.2.0"  # Standardized with "v" prefix
+APP_VERSION = "v0.2.1"  # Standardized with "v" prefix
 CACHE_DURATION = 3600  # 1 hour in seconds, consistent across the app
 
 class CustomMessageBox(tk.Toplevel):
@@ -568,8 +568,9 @@ class ModernLoadingScreen(tk.Tk):
         ui_names = [
             "Nillipuss UI 1080p",
             "Nillipuss UI 1440p",
-            "Qrustle1080-Z5x",
-            "Qrustle1440-Z5x",
+            "Qrustle1080-Z66x",
+            "Qrustle1440-Z66x",
+            "Qrustle1080Z66xL",
             "DuxaUI",
             "qqui (Calmethar Edition)",
             "FrankenPussUI"
@@ -578,14 +579,16 @@ class ModernLoadingScreen(tk.Tk):
         static_uis = {
             "qqui (Calmethar Edition)": "1.0.0",
             "DuxaUI": "1.0.0",
-            "Qrustle1080-Z5x": "1.0.0",
-            "Qrustle1440-Z5x": "1.0.0"
+            "Qrustle1080-Z66x": "6.6.x",
+            "Qrustle1440-Z66x": "6.6.x",
+            "Qrustle1080Z66xL": "6.6.x"
+
         }
         
         dynamic_uis = {
             "Nillipuss UI 1080p": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest",
             "Nillipuss UI 1440p": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest",
-            "FrankenPussUI": "https://api.github.com/repos/anotheregostar/FrankenPussUI/releases/latest"
+            "FrankenPussUI": "https://api.github.com/repos/anotheregostar/FrankenPussUI/releases/latest",
         }
         
         for ui_name in ui_names:
@@ -1066,8 +1069,9 @@ class ModernLoadingScreen(tk.Tk):
         ui_items = [
             ("Nillipuss UI 1080p", lambda: self.install_ui_files_for_update("Nillipuss UI 1080p")),
             ("Nillipuss UI 1440p", lambda: self.install_ui_files_for_update("Nillipuss UI 1440p")),
-            ("Qrustle1080-Z5x", lambda: self.install_ui_files_for_update("Qrustle1080-Z5x")),
-            ("Qrustle1440-Z5x", lambda: self.install_ui_files_for_update("Qrustle1440-Z5x")),
+            ("Qrustle1080-Z66x", lambda: self.install_ui_files_for_update("Qrustle1080-Z66x")),
+            ("Qrustle1080Z66xL", lambda: self.install_ui_files_for_update("Qrustle1080Z66xL")),
+            ("Qrustle1440-Z66x", lambda: self.install_ui_files_for_update("Qrustle1440-Z66x")),
             ("DuxaUI", lambda: self.install_ui_files_for_update("DuxaUI")),
             ("qqui (Calmethar Edition)", lambda: self.install_ui_files_for_update("qqui (Calmethar Edition)")),
             ("FrankenPussUI", lambda: self.install_ui_files_for_update("FrankenPussUI"))
@@ -1117,7 +1121,7 @@ class ModernLoadingScreen(tk.Tk):
         sections = [
             ("Directory Selection", [
                 ("Select Zeal Directory", self.select_zeal_dir),
-                ("Select QuarmTool Directory", self.select_quarmtool_dir),
+                ("Select QuarmTool Directory", self.select_quarmtool_dir), 
             ]),
             ("Install/Update", [
                 ("Zeal", self.update_zeal, "zeal_install_button"),
@@ -1129,8 +1133,9 @@ class ModernLoadingScreen(tk.Tk):
             ("UI Selection", [
                 ("Nillipuss UI 1080p", lambda: self.install_ui_files_for_update("Nillipuss UI 1080p")),
                 ("Nillipuss UI 1440p", lambda: self.install_ui_files_for_update("Nillipuss UI 1440p")),
-                ("Qrustle1080-Z5x", lambda: self.install_ui_files_for_update("Qrustle1080-Z5x")),
-                ("Qrustle1440-Z5x", lambda: self.install_ui_files_for_update("Qrustle1440-Z5x")),
+                ("Qrustle1080-Z66x", lambda: self.install_ui_files_for_update("Qrustle1080-Z66x")),
+                ("Qrustle1080Z66xL", lambda: self.install_ui_files_for_update("Qrustle1080Z66xL")),
+                ("Qrustle1440-Z66x", lambda: self.install_ui_files_for_update("Qrustle1440-Z66x")),
                 ("DuxaUI", lambda: self.install_ui_files_for_update("DuxaUI")),
                 ("qqui (Calmethar Edition)", lambda: self.install_ui_files_for_update("qqui (Calmethar Edition)")),
                 ("FrankenPussUI", lambda: self.install_ui_files_for_update("FrankenPussUI"))
@@ -1302,15 +1307,16 @@ class ModernLoadingScreen(tk.Tk):
         ui_urls = {
             "Nillipuss UI 1080p": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest",
             "Nillipuss UI 1440p": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest",
-            "Qrustle1080-Z5x": "https://github.com/user-attachments/files/17566105/Qrustle1080-Z5x.zip",
-            "Qrustle1440-Z5x": "https://github.com/user-attachments/files/17566110/Qrustle1440-Z5x.zip",
+            "Qrustle1080-Z66x": "https://github.com/UnforgivunAL/QRustle/releases/download/v6.6.x/Qrustle1080-Z66x.zip",
+            "Qrustle1080Z66xL": "https://github.com/UnforgivunAL/QRustle/releases/download/v6.6.x/Qrustle1080Z66xL.zip",
+            "Qrustle1440-Z66x": "https://github.com/UnforgivunAL/QRustle/releases/download/v6.6.x/Qrustle1440-Z66x.zip",
             "DuxaUI": "https://github.com/LordDemonos/Quarm.Guide/blob/master/assets/duxaUI.7z?raw=true",
             "qqui (Calmethar Edition)": "https://drive.google.com/uc?id=13aisHiN9kOkFJHywZnGUF0EfUOiq-jwx",
             "FrankenPussUI": "https://api.github.com/repos/anotheregostar/FrankenPussUI/releases/latest"
         }
         
         try:
-            if ui_name in ["qqui (Calmethar Edition)", "DuxaUI", "Qrustle1080-Z5x", "Qrustle1440-Z5x"]:
+            if ui_name in ["qqui (Calmethar Edition)", "DuxaUI", "Qrustle1080-Z66x", "Qrustle1080Z66xL", "Qrustle1440-Z66x"]:
                 latest_version_raw = "1.0.0"
             else:
                 response = requests.get(ui_urls[ui_name], timeout=5)
@@ -1876,11 +1882,24 @@ class ModernLoadingScreen(tk.Tk):
         ui_files = {
             "Nillipuss UI 1080p": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest",
             "Nillipuss UI 1440p": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest",
-            "Qrustle1080-Z5x": "https://github.com/user-attachments/files/17566105/Qrustle1080-Z5x.zip",
-            "Qrustle1440-Z5x": "https://github.com/user-attachments/files/17566110/Qrustle1440-Z5x.zip",
+            "Qrustle1080-Z66x": "https://github.com/UnforgivunAL/QRustle/releases/download/v6.6.x/Qrustle1080-Z66x.zip",
+            "Qrustle1080Z66xL": "https://github.com/UnforgivunAL/QRustle/releases/download/v6.6.x/Qrustle1080Z66xL.zip",
+            "Qrustle1440-Z66x": "https://github.com/UnforgivunAL/QRustle/releases/download/v6.6.x/Qrustle1440-Z66x.zip",
             "DuxaUI": "https://github.com/LordDemonos/Quarm.Guide/blob/master/assets/duxaUI.7z?raw=true",
             "qqui (Calmethar Edition)": "https://github.com/blastlaster/pqdi4all/releases/download/0.2/qqui_CalmetharEd.zip",
             "FrankenPussUI": "https://api.github.com/repos/anotheregostar/FrankenPussUI/releases/latest"
+        }
+        
+        # Mapping of UI names to folder names
+        ui_folder_mapping = {
+            "Nillipuss UI 1080p": "NillipussUI_1080p",
+            "Nillipuss UI 1440p": "NillipussUI_1440p",
+            "qqui (Calmethar Edition)": "qqui_CalmetharEd",
+            "Qrustle1080-Z66x": "Qrustle1080-Z66x",
+            "Qrustle1080Z66xL": "Qrustle1080Z66xL",
+            "Qrustle1440-Z66x": "Qrustle1440-Z66x",
+            "DuxaUI": "DuxaUI",
+            "FrankenPussUI": "FrankenPussUI"
         }
         
         self.log_message(f"Checking {ui_name}...", "white")
@@ -1898,7 +1917,7 @@ class ModernLoadingScreen(tk.Tk):
             is_installed = self.is_ui_installed(ui_name, zeal_dir)
             current_version = self.ui_versions.get(ui_name, {}).get("normalized", "0.0.0")
             
-            if ui_name not in ["qqui (Calmethar Edition)", "DuxaUI", "Qrustle1080-Z5x", "Qrustle1440-Z5x"]:
+            if ui_name not in ["qqui (Calmethar Edition)", "Qrustle1080-Z66x", "Qrustle1080Z66xL", "Qrustle1440-Z66x", "DuxaUI"]:
                 response = requests.get(download_url, timeout=5)
                 if response.status_code != 200:
                     self.log_message(f"Failed to fetch release info for {ui_name}: Status {response.status_code}", "red")
@@ -1961,10 +1980,8 @@ class ModernLoadingScreen(tk.Tk):
                 extracted_items = os.listdir(temp_extract_path)
                 if extracted_items:
                     extracted_folder = os.path.join(temp_extract_path, extracted_items[0])
-                    if ui_name == "qqui (Calmethar Edition)":
-                        target_folder = os.path.join(download_path, "qqui_CalmetharEd")
-                    else:
-                        target_folder = os.path.join(download_path, ui_name)
+                    # Use the mapped folder name from ui_folder_mapping
+                    target_folder = os.path.join(download_path, ui_folder_mapping[ui_name])
                     if os.path.exists(target_folder):
                         shutil.rmtree(target_folder)
                     shutil.move(extracted_folder, target_folder)
@@ -1974,14 +1991,6 @@ class ModernLoadingScreen(tk.Tk):
                 self.update_progress(50)
                 
                 self.delete_unwanted_ui_folders(zeal_dir)
-                
-                if ui_name in ["Qrustle1080-Z5x", "Qrustle1440-Z5x"]:
-                    problematic_file = os.path.join(download_path, ui_name, "EQUI_ShortDurationBuffWindow.xml")
-                    if os.path.exists(problematic_file):
-                        os.remove(problematic_file)
-                        self.log_message(f"Removed problematic EQUI_ShortDurationBuffWindow.xml from {ui_name}", "yellow")
-                    else:
-                        self.log_message(f"EQUI_ShortDurationBuffWindow.xml not found in {ui_name}", "yellow")
                 
                 self.update_progress(100)
                 self.log_message(f"Updated {ui_name}", "green")
@@ -2003,8 +2012,9 @@ class ModernLoadingScreen(tk.Tk):
             "Nillipuss UI 1080p": ["Nillipuss UI 1080p", "NillipussUI_1080p"],
             "Nillipuss UI 1440p": ["Nillipuss UI 1440p", "NillipussUI_1440p"],
             "FrankenPussUI": ["FrankenPussUI"],
-            "Qrustle1080-Z5x": ["Qrustle1080-Z5x"],
-            "Qrustle1440-Z5x": ["Qrustle1440-Z5x"],
+            "Qrustle1080-Z66x": ["Qrustle1080-Z66x"],
+            "Qrustle1080Z66xL": ["Qrustle1080Z66xL"],
+            "Qrustle1440-Z66x": ["Qrustle1440-Z66x"]
         }.get(ui_name, [ui_name])
         for variant in ui_variants:
             ui_path = os.path.join(base_path, variant)
