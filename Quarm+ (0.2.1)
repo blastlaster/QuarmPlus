@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 import re
 
 settings_file = "settings.json"
-APP_VERSION = "v0.2.0"  # Standardized with "v" prefix
+APP_VERSION = "v0.2.1"  # Standardized with "v" prefix
 CACHE_DURATION = 3600  # 1 hour in seconds, consistent across the app
 
 class CustomMessageBox(tk.Toplevel):
@@ -566,8 +566,8 @@ class ModernLoadingScreen(tk.Tk):
             return
         
         ui_names = [
-            "Nillipuss UI 1080p",
-            "Nillipuss UI 1440p",
+            "NillipussUI_1080p",
+            "NillipussUI_1440p",
             "Qrustle1080-Z5x",
             "Qrustle1440-Z5x",
             "DuxaUI",
@@ -583,8 +583,8 @@ class ModernLoadingScreen(tk.Tk):
         }
         
         dynamic_uis = {
-            "Nillipuss UI 1080p": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest",
-            "Nillipuss UI 1440p": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest",
+            "NillipussUI_1080p": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest",
+            "NillipussUI_1440p": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest",
             "FrankenPussUI": "https://api.github.com/repos/anotheregostar/FrankenPussUI/releases/latest"
         }
         
@@ -1064,8 +1064,8 @@ class ModernLoadingScreen(tk.Tk):
         self.section_frames["UI Selection"] = (header, content_frame)
         
         ui_items = [
-            ("Nillipuss UI 1080p", lambda: self.install_ui_files_for_update("Nillipuss UI 1080p")),
-            ("Nillipuss UI 1440p", lambda: self.install_ui_files_for_update("Nillipuss UI 1440p")),
+            ("NillipussUI_1080p", lambda: self.install_ui_files_for_update("NillipussUI_1080p")),
+            ("NillipussUI_1440p", lambda: self.install_ui_files_for_update("NillipussUI_1440p")),
             ("Qrustle1080-Z5x", lambda: self.install_ui_files_for_update("Qrustle1080-Z5x")),
             ("Qrustle1440-Z5x", lambda: self.install_ui_files_for_update("Qrustle1440-Z5x")),
             ("DuxaUI", lambda: self.install_ui_files_for_update("DuxaUI")),
@@ -1127,8 +1127,8 @@ class ModernLoadingScreen(tk.Tk):
                 ("Quarm Patcher", self.install_quarm_patcher, "patcher_button")
             ]),
             ("UI Selection", [
-                ("Nillipuss UI 1080p", lambda: self.install_ui_files_for_update("Nillipuss UI 1080p")),
-                ("Nillipuss UI 1440p", lambda: self.install_ui_files_for_update("Nillipuss UI 1440p")),
+                ("NillipussUI_1080p", lambda: self.install_ui_files_for_update("NillipussUI_1080p")),
+                ("NillipussUI_1440p", lambda: self.install_ui_files_for_update("NillipussUI_1440p")),
                 ("Qrustle1080-Z5x", lambda: self.install_ui_files_for_update("Qrustle1080-Z5x")),
                 ("Qrustle1440-Z5x", lambda: self.install_ui_files_for_update("Qrustle1440-Z5x")),
                 ("DuxaUI", lambda: self.install_ui_files_for_update("DuxaUI")),
@@ -1300,8 +1300,8 @@ class ModernLoadingScreen(tk.Tk):
         current_version = self.ui_versions.get(ui_name, {}).get("normalized", "0.0.0")
         
         ui_urls = {
-            "Nillipuss UI 1080p": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest",
-            "Nillipuss UI 1440p": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest",
+            "NillipussUI_1080p": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest",
+            "NillipussUI_1440p": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest",
             "Qrustle1080-Z5x": "https://github.com/user-attachments/files/17566105/Qrustle1080-Z5x.zip",
             "Qrustle1440-Z5x": "https://github.com/user-attachments/files/17566110/Qrustle1440-Z5x.zip",
             "DuxaUI": "https://github.com/LordDemonos/Quarm.Guide/blob/master/assets/duxaUI.7z?raw=true",
@@ -1874,8 +1874,8 @@ class ModernLoadingScreen(tk.Tk):
             return
         
         ui_files = {
-            "Nillipuss UI 1080p": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest",
-            "Nillipuss UI 1440p": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest",
+            "NillipussUI_1080p": "https://api.github.com/repos/NilliP/NillipussUI_1080p/releases/latest",
+            "NillipussUI_1440p": "https://api.github.com/repos/NilliP/NillipussUI_1440p/releases/latest",
             "Qrustle1080-Z5x": "https://github.com/user-attachments/files/17566105/Qrustle1080-Z5x.zip",
             "Qrustle1440-Z5x": "https://github.com/user-attachments/files/17566110/Qrustle1440-Z5x.zip",
             "DuxaUI": "https://github.com/LordDemonos/Quarm.Guide/blob/master/assets/duxaUI.7z?raw=true",
@@ -1963,6 +1963,10 @@ class ModernLoadingScreen(tk.Tk):
                     extracted_folder = os.path.join(temp_extract_path, extracted_items[0])
                     if ui_name == "qqui (Calmethar Edition)":
                         target_folder = os.path.join(download_path, "qqui_CalmetharEd")
+                    elif ui_name == "NillipussUI_1080p":
+                        target_folder = os.path.join(download_path, "NillipussUI_1080p")
+                    elif ui_name == "NillipussUI_1440p":
+                        target_folder = os.path.join(download_path, "NillipussUI_1440p")
                     else:
                         target_folder = os.path.join(download_path, ui_name)
                     if os.path.exists(target_folder):
@@ -2000,8 +2004,8 @@ class ModernLoadingScreen(tk.Tk):
             return False
         base_path = os.path.join(zeal_dir, "uifiles")
         ui_variants = {
-            "Nillipuss UI 1080p": ["Nillipuss UI 1080p", "NillipussUI_1080p"],
-            "Nillipuss UI 1440p": ["Nillipuss UI 1440p", "NillipussUI_1440p"],
+            "NillipussUI_1080p": ["Nillipuss UI 1080p", "NillipussUI_1080p"],
+            "NillipussUI_1440p": ["Nillipuss UI 1440p", "NillipussUI_1440p"],
             "FrankenPussUI": ["FrankenPussUI"],
             "Qrustle1080-Z5x": ["Qrustle1080-Z5x"],
             "Qrustle1440-Z5x": ["Qrustle1440-Z5x"],
