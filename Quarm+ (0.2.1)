@@ -731,7 +731,7 @@ class ModernLoadingScreen(tk.Tk):
     def initial_version_check(self):
         self.log_message("Checking initial versions...", "white")
         try:
-            zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("iamclint/Zeal"))
+            zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("CoastalRedwood/Zeal"))
             self.zeal_versions = zeal_data["full"] + zeal_data["beta"]
             self.full_zeal_versions = zeal_data["full"]
             self.latest_full = zeal_data["full"][0] if zeal_data["full"] else "Unknown"
@@ -792,7 +792,7 @@ class ModernLoadingScreen(tk.Tk):
                     del self.version_cache["zeal_versions"]
                 updates.append("Zeal")
             else:
-                zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("iamclint/Zeal"))
+                zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("CoastalRedwood/Zeal"))
                 self.zeal_versions = zeal_data["full"] + zeal_data["beta"]
                 self.latest_full = zeal_data["full"][0] if zeal_data["full"] else "Unknown"
                 self.latest_beta = zeal_data["beta"][0] if zeal_data["beta"] else None
@@ -861,7 +861,7 @@ class ModernLoadingScreen(tk.Tk):
     def update_zeal_button(self):
         if self.zeal_update_button is None:
             return
-        zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("iamclint/Zeal"))
+        zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("CoastalRedwood/Zeal"))
         latest_full = zeal_data["full"][0] if zeal_data["full"] else "Unknown"
         latest_beta = zeal_data["beta"][0] if zeal_data["beta"] else None
         latest_zeal = latest_beta if self.prefer_beta.get() and latest_beta else latest_full
@@ -1447,14 +1447,14 @@ class ModernLoadingScreen(tk.Tk):
                     del self.version_cache["zeal_versions"]
                 updates.append("Zeal")
                 # Set to latest version if not installed
-                zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("iamclint/Zeal"))
+                zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("CoastalRedwood/Zeal"))
                 self.zeal_versions = zeal_data["full"] + zeal_data["beta"]
                 self.latest_full = zeal_data["full"][0] if zeal_data["full"] else "Unknown"
                 self.latest_beta = zeal_data["beta"][0] if zeal_data["beta"] else None
                 latest_zeal = self.latest_beta if self.prefer_beta.get() and self.latest_beta else self.latest_full
                 self.selected_zeal_version.set(latest_zeal if latest_zeal != "Unknown" else "Unknown")
             else:
-                zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("iamclint/Zeal"))
+                zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("CoastalRedwood/Zeal"))
                 self.zeal_versions = zeal_data["full"] + zeal_data["beta"]
                 self.latest_full = zeal_data["full"][0] if zeal_data["full"] else "Unknown"
                 self.latest_beta = zeal_data["beta"][0] if zeal_data["beta"] else None
@@ -1546,7 +1546,7 @@ class ModernLoadingScreen(tk.Tk):
             if not self.is_zeal_installed():
                 updates.append("Zeal")
             else:
-                zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("iamclint/Zeal"))
+                zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("CoastalRedwood/Zeal"))
                 if zeal_data["full"]:
                     current_zeal_raw = self.ui_versions.get("Zeal", {}).get("raw", "0.0.0")
                     current_zeal_normalized = self.ui_versions.get("Zeal", {}).get("normalized", "0.0.0")
@@ -1581,7 +1581,7 @@ class ModernLoadingScreen(tk.Tk):
             self.update_zeal_button()
 
     def on_prefer_beta_change(self):
-        zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("iamclint/Zeal"))
+        zeal_data = self.get_cached_version("zeal_versions", lambda: self.fetch_versions("CoastalRedwood/Zeal"))
         latest_full = zeal_data["full"][0] if zeal_data["full"] else "Unknown"
         latest_beta = zeal_data["beta"][0] if zeal_data["beta"] else None
         latest_zeal = latest_beta if self.prefer_beta.get() and latest_beta else latest_full
@@ -1612,7 +1612,7 @@ class ModernLoadingScreen(tk.Tk):
                 response = requests.get(f"https://api.github.com/repos/{repo}/releases", timeout=5)
                 if response.status_code == 200:
                     releases = response.json()
-                    if repo == "iamclint/Zeal":
+                    if repo == "CoastalRedwood/Zeal":
                         full_releases = [release['tag_name'] for release in releases if "beta" not in release['tag_name'].lower()]
                         beta_releases = [release['tag_name'] for release in releases if "beta" in release['tag_name'].lower()]
                         return {"full": full_releases, "beta": beta_releases}
@@ -1621,25 +1621,25 @@ class ModernLoadingScreen(tk.Tk):
                         return [release['tag_name'] for release in releases]
                 elif response.status_code == 403:
                     self.log_message(f"GitHub API rate limit exceeded for {repo}. Please try again later.", "red")
-                    return [] if repo != "iamclint/Zeal" else {"full": [], "beta": []}
+                    return [] if repo != "CoastalRedwood/Zeal" else {"full": [], "beta": []}
                 elif response.status_code == 404:
                     self.log_message(f"Repository {repo} not found on GitHub.", "red")
-                    return [] if repo != "iamclint/Zeal" else {"full": [], "beta": []}
+                    return [] if repo != "CoastalRedwood/Zeal" else {"full": [], "beta": []}
                 else:
                     self.log_message(f"Failed to fetch versions for {repo}: Status {response.status_code}", "yellow")
-                    return [] if repo != "iamclint/Zeal" else {"full": [], "beta": []}
+                    return [] if repo != "CoastalRedwood/Zeal" else {"full": [], "beta": []}
             except requests.Timeout:
                 self.log_message(f"Timeout while fetching versions for {repo} (Attempt {attempt + 1}/{max_retries})", "yellow")
                 if attempt == max_retries - 1:
                     self.log_message(f"Max retries reached. Could not fetch versions for {repo}.", "red")
-                    return [] if repo != "iamclint/Zeal" else {"full": [], "beta": []}
+                    return [] if repo != "CoastalRedwood/Zeal" else {"full": [], "beta": []}
             except requests.RequestException as e:
                 self.log_message(f"Error fetching versions for {repo} (Attempt {attempt + 1}/{max_retries}): {str(e)}", "yellow")
                 if attempt == max_retries - 1:
                     self.log_message(f"Max retries reached. Could not fetch versions for {repo}.", "red")
-                    return [] if repo != "iamclint/Zeal" else {"full": [], "beta": []}
+                    return [] if repo != "CoastalRedwood/Zeal" else {"full": [], "beta": []}
             time.sleep(2 ** attempt)
-        return [] if repo != "iamclint/Zeal" else {"full": [], "beta": []}
+        return [] if repo != "CoastalRedwood/Zeal" else {"full": [], "beta": []}
 
     def normalize_version(self, version_str):
         if not isinstance(version_str, str):
@@ -1751,7 +1751,7 @@ class ModernLoadingScreen(tk.Tk):
         self.log_message(f"Installing Zeal version {selected_version}...")
         self.update_progress(0)
         
-        zeal_updated = self.check_and_update("Zeal", selected_version, "iamclint/Zeal", zeal_dir)
+        zeal_updated = self.check_and_update("Zeal", selected_version, "CoastalRedwood/Zeal", zeal_dir)
         if zeal_updated:
             if self.is_zeal_installed():
                 # Ensure raw version does not have 'v' prefix
