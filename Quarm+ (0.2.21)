@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 import re
 
 settings_file = "settings.json"
-APP_VERSION = "v0.2.1"  # Standardized with "v" prefix
+APP_VERSION = "v0.2.21"  # Standardized with "v" prefix
 CACHE_DURATION = 3600  # 1 hour in seconds, consistent across the app
 
 class CustomMessageBox(tk.Toplevel):
