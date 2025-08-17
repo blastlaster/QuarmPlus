@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 import re
 
 settings_file = "settings.json"
-APP_VERSION = "v0.2.21"  # Standardized with "v" prefix
+APP_VERSION = "v0.2.22"  # Standardized with "v" prefix
 CACHE_DURATION = 3600  # 1 hour in seconds, consistent across the app
 
 class CustomMessageBox(tk.Toplevel):
@@ -415,6 +415,8 @@ class ModernLoadingScreen(tk.Tk):
         self.section_states = self.settings.get("section_states", {})
         self.prefer_beta = tk.BooleanVar(value=self.settings.get("prefer_beta", False))
         self.section_frames = {}
+        self.qrustle_header = None
+        self.qrustle_subframe = None
 
         self.create_sections()
         self.center_window_with_padding()
@@ -455,17 +457,6 @@ class ModernLoadingScreen(tk.Tk):
 
                   You're in our world now.
                                                             '''
-        # List of UI folders to delete during installations
-        self.ui_folders_to_delete = [
-            "Infiniti-Blue",
-            "Nemesis",
-            "poweroftwo",
-            "QQ",
-            "TK_Steamworks",
-            "vert",
-            "WizModRyo"
-        ]
-
         self.art_label = tk.Label(self.center_frame, text=ascii_art, 
                                  font=('Courier New', 8), 
                                  fg="lightgray", 
@@ -621,20 +612,6 @@ class ModernLoadingScreen(tk.Tk):
         self.update_quarmplus_button()
         self.update_patcher_button()
         self.update_ui_selection()
-
-    def delete_unwanted_ui_folders(self, zeal_dir):
-        uifiles_dir = os.path.join(zeal_dir, "uifiles")
-        if not os.path.exists(uifiles_dir):
-            return
-        
-        for folder in self.ui_folders_to_delete:
-            folder_path = os.path.join(uifiles_dir, folder)
-            if os.path.exists(folder_path):
-                try:
-                    shutil.rmtree(folder_path)
-                    self.log_message(f"Removed unwanted UI folder: {folder}", "yellow")
-                except Exception as e:
-                    self.log_message(f"Error removing {folder}: {str(e)}", "red")
 
     def log_message(self, message, color="white"):
         if hasattr(self, 'logger_label'):
@@ -1253,6 +1230,14 @@ class ModernLoadingScreen(tk.Tk):
                                       font=("Segoe UI", 10), fg="white", bg="#0078D4",
                                       activebackground="#106EBE")
                     button.pack(fill=tk.X, pady=2)
+
+    def toggle_qrustle(self):
+        if self.qrustle_subframe.winfo_ismapped():
+            self.qrustle_subframe.pack_forget()
+            self.qrustle_header.config(text="▶ QRustle")
+        else:
+            self.qrustle_subframe.pack(after=self.qrustle_header, fill="x", padx=10)
+            self.qrustle_header.config(text="▼ QRustle")
 
     def show_version_dropdown(self, app_name, parent_frame):
         versions = self.zeal_versions if app_name == "Zeal" else self.quarmtool_versions
@@ -1977,8 +1962,6 @@ class ModernLoadingScreen(tk.Tk):
                 os.remove(download_path_file)
                 self.update_progress(50)
                 
-                self.delete_unwanted_ui_folders(zeal_dir)
-                
                 if ui_name in ["Qrustle1080-Z5x", "Qrustle1440-Z5x"]:
                     problematic_file = os.path.join(download_path, ui_name, "EQUI_ShortDurationBuffWindow.xml")
                     if os.path.exists(problematic_file):
@@ -2280,16 +2263,6 @@ class ModernLoadingScreen(tk.Tk):
             content_frame.pack_forget()
         
         self.save_settings()
-
-    def delete_uifiles_zeal(self, zeal_dir):
-        uifiles_dir = os.path.join(zeal_dir, "uifiles")
-        if os.path.exists(uifiles_dir):
-            for item in os.listdir(uifiles_dir):
-                item_path = os.path.join(uifiles_dir, item)
-                if os.path.isfile(item_path) and not item.lower().endswith('.tga'):
-                    os.remove(item_path)
-                elif os.path.isdir(item_path):
-                    shutil.rmtree(item_path, ignore_errors=True)
 
     def optimize_settings(self):
         zeal_dir = self.zeal_dir.get()
