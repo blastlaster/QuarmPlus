@@ -44,7 +44,7 @@ import re
 from urllib.parse import urlparse, parse_qs
 
 settings_file = "settings.json"
-APP_VERSION = "v0.3.0"
+APP_VERSION = "v0.3.1"
 CACHE_DURATION = 3600
 
 
@@ -825,7 +825,7 @@ class ModernLoadingScreen(tk.Tk):
     def remove_custom_ui(self, cn):
         self.custom_uis.pop(cn, None); self.ui_versions.pop(cn, None); self.save_settings(); self.log_message(f"Removed: {cn}", "yellow"); self.update_ui_selection()
 
-    INCOMPATIBLE_UIS = ["Infiniti-Blue", "Nemesis", "poweroftwo", "QQ", "TK_Steamworks", "vert", "WizModRyo"]
+    INCOMPATIBLE_UIS = ["Nemesis", "poweroftwo", "QQ", "TK_Steamworks", "vert", "WizModRyo"]
 
     def _has_incompatible_uis(self):
         """Check if any known incompatible UI folders exist in uifiles/."""
