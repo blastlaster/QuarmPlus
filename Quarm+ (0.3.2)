@@ -44,7 +44,7 @@ import re
 from urllib.parse import urlparse, parse_qs
 
 settings_file = "settings.json"
-APP_VERSION = "v0.3.1"
+APP_VERSION = "v0.3.2"
 CACHE_DURATION = 3600
 
 
@@ -163,7 +163,7 @@ class AdvancedConfiguratorWindow(tk.Toplevel):
         if os.path.exists(self.eqclient_path):
             self.config.read(self.eqclient_path)
         else:
-            for s in ['VideoMode', 'Defaults', 'Options']:
+            for s in ['VideoMode', 'Defaults', 'Options', 'EqwGeneral']:
                 self.config[s] = {}
         nb = ttk.Notebook(self.main_frame)
         nb.pack(fill="both", expand=True)
@@ -182,6 +182,8 @@ class AdvancedConfiguratorWindow(tk.Toplevel):
         tk.Label(vf, text="Refresh Rate:", fg="white", bg="black", font=("Segoe UI", 10)).pack(anchor="w", pady=(10, 2))
         self.refresh_var = tk.StringVar(value=self.config.get('VideoMode', 'RefreshRate', fallback="60"))
         tk.Entry(vf, textvariable=self.refresh_var, bg="#2A3435", fg="white", insertbackground="white", relief="flat").pack(fill="x", pady=2)
+        self.gamma_ramp_var = tk.BooleanVar(value=self.config.get('EqwGeneral', 'EnableGammaRamp', fallback="FALSE").upper() == "TRUE")
+        tk.Checkbutton(vf, text="Enable Gamma Ramp", variable=self.gamma_ramp_var, fg="white", bg="black", selectcolor="black", activebackground="black", activeforeground="white", font=("Segoe UI", 10)).pack(anchor="w", pady=5)
         # FPS
         ff = tk.Frame(nb, bg="black"); nb.add(ff, text="FPS")
         for lbl, key, fb in [("Max FPS:", 'MaxFPS', "60"), ("Max Background FPS:", 'MaxBGFPS', "30"), ("Max Mouselook FPS:", 'MaxMouseLookFPS', "60")]:
@@ -226,9 +228,10 @@ class AdvancedConfiguratorWindow(tk.Toplevel):
 
     def save_config(self):
         try:
-            for s in ['VideoMode', 'Defaults', 'Options']:
+            for s in ['VideoMode', 'Defaults', 'Options', 'EqwGeneral']:
                 if not self.config.has_section(s): self.config.add_section(s)
             self.config['Defaults']['WindowedMode'] = str(self.windowed_var.get()).upper()
+            self.config['EqwGeneral']['EnableGammaRamp'] = 'TRUE' if self.gamma_ramp_var.get() else 'FALSE'
             res = self.resolution_var.get().strip()
             if 'x' not in res: raise ValueError("Resolution must be WxH")
             w, h = res.split('x')
@@ -1026,6 +1029,8 @@ class ModernLoadingScreen(tk.Tk):
             if os.path.exists(ep): c.read(ep)
             for s in ['VideoMode', 'Defaults', 'Options']:
                 if not c.has_section(s): c.add_section(s)
+            if not c.has_section('EqwGeneral'): c.add_section('EqwGeneral')
+            c.set('EqwGeneral', 'EnableGammaRamp', 'TRUE')
             for k, v in [('Width', str(self.winfo_screenwidth())), ('Height', str(self.winfo_screenheight())), ('BitsPerPixel', '32'), ('RefreshRate', '60')]: c.set('VideoMode', k, v)
             for k, v in [('NewUI', 'TRUE'), ('OldUI', 'FALSE'), ('TextureCache', 'FALSE'), ('WindowedMode', 'FALSE')]: c.set('Defaults', k, v)
             for k, v in [('MaxFPS', '144'), ('MaxBGFPS', '60'), ('NoFPSLimiter', 'FALSE')]: c.set('Options', k, v)
