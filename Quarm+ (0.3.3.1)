@@ -44,8 +44,16 @@ import re
 from urllib.parse import urlparse, parse_qs
 
 settings_file = "settings.json"
-APP_VERSION = "v0.3.2"
+APP_VERSION = "v0.3.3.1"
 CACHE_DURATION = 3600
+ICON_FILE = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "quarmplus.ico")
+
+# Set Windows taskbar icon to use Quarm+ identity instead of default Python
+try:
+    import ctypes
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('blastlaster.quarmplus.launcher')
+except Exception:
+    pass
 
 
 # =============================================================================
@@ -286,9 +294,13 @@ class ModernLoadingScreen(tk.Tk):
         self.configure(bg="black")
         self.geometry("820x820")
         self.resizable(False, False)
+        try:
+            if os.path.exists(ICON_FILE): self.iconbitmap(ICON_FILE)
+        except Exception:
+            pass
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-        self.zeal_update_button = self.quarmtool_update_button = self.patcher_button = self.quarmplus_update_button = None
+        self.zeal_update_button = self.quarmtool_update_button = self.patcher_button = self.quarmplus_update_button = self.kaichofx_button = self.pqcompanion_button = None
         self.version_cache = {}
         self.zeal_versions = []
         self.quarmtool_versions = []
@@ -300,6 +312,7 @@ class ModernLoadingScreen(tk.Tk):
         self.settings = self.load_settings()
         self.zeal_dir = tk.StringVar(value=self.settings.get("zeal_dir", ""))
         self.quarmtool_dir = tk.StringVar(value=self.settings.get("quarmtool_dir", ""))
+        self.pqcompanion_dir = tk.StringVar(value=self.settings.get("pqcompanion_dir", ""))
         self.zeal_version_var = tk.StringVar(value="Unknown")
         self.quarmtool_version_var = tk.StringVar(value="Unknown")
         self.ui_versions = self.settings.get("ui_versions", {})
@@ -382,10 +395,12 @@ class ModernLoadingScreen(tk.Tk):
         bf = tk.Frame(self.center_frame, bg="black"); bf.pack(pady=5)
         rf = tk.Frame(bf, bg="black"); rf.pack()
         tk.Button(rf, text="Run QuarmTool", command=self.run_quarmtool, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE").pack(side=tk.LEFT, padx=5)
-        tk.Button(rf, text="Run Quarm", command=self.run_project_quarm, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE").pack(side=tk.LEFT, padx=5)
         tk.Button(rf, text="Run Patcher", command=self.run_quarm_patcher, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE").pack(side=tk.LEFT, padx=5)
+        self.run_pqcompanion_button = tk.Button(rf, text="Run PQ Companion", command=self.run_pq_companion, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE")
+        if self.is_pqcompanion_installed(): self.run_pqcompanion_button.pack(side=tk.LEFT, padx=5)
         uf = tk.Frame(bf, bg="black"); uf.pack(pady=(5, 0))
-        tk.Button(uf, text="Check for Updates", command=self.check_and_install_updates, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE").pack()
+        tk.Button(uf, text="Run Quarm", command=self.run_project_quarm, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE").pack(side=tk.LEFT, padx=5)
+        tk.Button(uf, text="Check for Updates", command=self.check_and_install_updates, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE").pack(side=tk.LEFT, padx=5)
 
         self.center_window_with_padding()
         self.after(100, self.perform_initial_setup)
@@ -400,7 +415,7 @@ class ModernLoadingScreen(tk.Tk):
 
     # -- Settings --
     def load_settings(self):
-        defs = {"version": APP_VERSION, "zeal_dir": "", "quarmtool_dir": "", "ui_versions": {}, "section_states": {}, "custom_uis": {}}
+        defs = {"version": APP_VERSION, "zeal_dir": "", "quarmtool_dir": "", "pqcompanion_dir": "", "ui_versions": {}, "section_states": {}, "custom_uis": {}}
         if os.path.exists(settings_file):
             try:
                 with open(settings_file) as f: ld = json.load(f)
@@ -414,20 +429,25 @@ class ModernLoadingScreen(tk.Tk):
 
     def migrate_settings(self, old, defs):
         m = defs.copy()
-        for k in ["zeal_dir", "quarmtool_dir", "ui_versions", "section_states", "custom_uis"]:
+        for k in ["zeal_dir", "quarmtool_dir", "pqcompanion_dir", "ui_versions", "section_states", "custom_uis"]:
             if k in old: m[k] = old[k]
-        m.setdefault("custom_uis", {}); m["version"] = APP_VERSION; return m
+        m.setdefault("custom_uis", {})
+        # Migrate "Install/Update" section state to "Addons"
+        ss = m.get("section_states", {})
+        if "Install/Update" in ss:
+            ss["Addons"] = ss.pop("Install/Update")
+        m["version"] = APP_VERSION; return m
 
     def save_settings(self):
         try:
             with open(settings_file, 'w') as f:
-                json.dump({"version": APP_VERSION, "zeal_dir": self.zeal_dir.get(), "quarmtool_dir": self.quarmtool_dir.get(), "ui_versions": self.ui_versions, "section_states": self.section_states, "custom_uis": self.custom_uis}, f, indent=4)
+                json.dump({"version": APP_VERSION, "zeal_dir": self.zeal_dir.get(), "quarmtool_dir": self.quarmtool_dir.get(), "pqcompanion_dir": self.pqcompanion_dir.get(), "ui_versions": self.ui_versions, "section_states": self.section_states, "custom_uis": self.custom_uis}, f, indent=4)
         except Exception as e: self.log_message(f"Save error: {e}", "red")
 
     # -- Startup --
     def perform_initial_setup(self):
         self.initialize_ui_versions(); self.initial_version_check(); self.check_for_updates_on_start()
-        self.update_zeal_button(); self.update_quarmtool_button(); self.update_quarmplus_button(); self.update_patcher_button(); self.update_ui_selection()
+        self.update_zeal_button(); self.update_quarmtool_button(); self.update_quarmplus_button(); self.update_patcher_button(); self.update_kaichofx_button(); self.update_pqcompanion_button(); self.update_dir_buttons(); self.update_ui_selection()
 
     def initialize_ui_versions(self):
         if not self.zeal_dir.get(): return
@@ -456,7 +476,7 @@ class ModernLoadingScreen(tk.Tk):
             ups = self._check_all_updates()
             self.log_message(("Update(s): " + ", ".join(ups) + "\nClick yellow buttons to update") if ups else "Up to date - Ready to play!", "#ADD8E6" if ups else "green")
         except Exception as e: self.log_message(f"Error: {e}", "red")
-        finally: self.update_progress(100); self.update_zeal_button(); self.update_quarmtool_button(); self.update_quarmplus_button()
+        finally: self.update_progress(100); self.update_zeal_button(); self.update_quarmtool_button(); self.update_quarmplus_button(); self.update_kaichofx_button(); self.update_pqcompanion_button()
 
     def _check_all_updates(self):
         ups = []; self.version_cache.pop("zeal_versions", None); self.version_cache.pop("quarmtool_versions", None)
@@ -480,6 +500,14 @@ class ModernLoadingScreen(tk.Tk):
                 lv = r.json()['tag_name']; self.quarmplus_version_var.set(lv)
                 if version.parse(lv) > version.parse(APP_VERSION): ups.append("Quarm+")
         except Exception: pass
+        if self.is_kaichofx_installed():
+            try:
+                r = requests.get("https://api.github.com/repos/IraLeePNG/KaichoFX_quarm_spellparticles/releases/latest", timeout=5)
+                if r.status_code == 200:
+                    lv = r.json().get('tag_name', '0.0.0'); ln = self.normalize_version(lv)
+                    cn = self.ui_versions.get("KaichoFX", {}).get("normalized", "0.0.0")
+                    if version.parse(ln) > version.parse(cn): ups.append("KaichoFX")
+            except Exception: pass
         return ups
 
     # -- Buttons --
@@ -524,6 +552,42 @@ class ModernLoadingScreen(tk.Tk):
         inst = self.is_quarm_patcher_installed()
         self.patcher_button.config(text="Quarm Patcher \u2611" if inst else "Install Quarm Patcher", fg="white", bg="#0078D4" if inst else "#FF4040", activebackground="#106EBE" if inst else "#FF4040")
 
+    def update_kaichofx_button(self):
+        if not self.kaichofx_button: return
+        if not self.is_kaichofx_installed():
+            self.kaichofx_button.config(text="Install KaichoFX", bg="yellow", fg="black", activebackground="yellow")
+        else:
+            try:
+                r = requests.get("https://api.github.com/repos/IraLeePNG/KaichoFX_quarm_spellparticles/releases/latest", timeout=5)
+                if r.status_code == 200:
+                    lv = r.json().get('tag_name', '0.0.0'); ln = self.normalize_version(lv)
+                    cn = self.ui_versions.get("KaichoFX", {}).get("normalized", "0.0.0")
+                    cr = self.ui_versions.get("KaichoFX", {}).get("raw", "Unknown")
+                    if version.parse(ln) > version.parse(cn):
+                        self.kaichofx_button.config(text=f"Update KaichoFX ({cr})", bg="yellow", fg="black", activebackground="yellow")
+                    else:
+                        self.kaichofx_button.config(text=f"KaichoFX ({cr}) \u2611", bg="#0078D4", fg="white", activebackground="#106EBE")
+                    return
+            except Exception: pass
+            cr = self.ui_versions.get("KaichoFX", {}).get("raw", "Unknown")
+            self.kaichofx_button.config(text=f"KaichoFX ({cr})", bg="#0078D4", fg="white", activebackground="#106EBE")
+
+    def update_pqcompanion_button(self):
+        if not self.pqcompanion_button: return
+        inst = self.is_pqcompanion_installed()
+        self.pqcompanion_button.config(text="PQ Companion \u2611" if inst else "Install PQ Companion", fg="white", bg="#0078D4" if inst else "#FF4040", activebackground="#106EBE" if inst else "#FF4040")
+
+    def update_dir_buttons(self):
+        if hasattr(self, 'dir_zeal_button'):
+            ck = " \u2611" if self.zeal_dir.get() and os.path.exists(os.path.join(self.zeal_dir.get(), "eqgame.exe")) else ""
+            self.dir_zeal_button.config(text=f"Select Zeal Directory{ck}")
+        if hasattr(self, 'dir_quarmtool_button'):
+            ck = " \u2611" if self.quarmtool_dir.get() and os.path.exists(os.path.join(self.quarmtool_dir.get(), "QuarmTool.exe")) else ""
+            self.dir_quarmtool_button.config(text=f"Select QuarmTool Directory{ck}")
+        if hasattr(self, 'dir_pqcompanion_button'):
+            ck = " \u2611" if self.is_pqcompanion_installed() else ""
+            self.dir_pqcompanion_button.config(text=f"Select PQ Companion{ck}")
+
     def update_ui_selection(self):
         if "UI Selection" not in self.section_frames: return
         cm, cc = self.logger_label.cget("text"), self.logger_label.cget("fg")
@@ -550,8 +614,8 @@ class ModernLoadingScreen(tk.Tk):
     def create_sections(self):
         for w in self.left_frame.winfo_children(): w.destroy()
         self.section_frames.clear()
-        for sn, items in [("Directory Selection", [("Select Zeal Directory", self.select_zeal_dir), ("Select QuarmTool Directory", self.select_quarmtool_dir)]),
-                          ("Install/Update", [("Zeal", self.update_zeal, "zeal_install_button"), ("QuarmTool", self.update_quarmtool, "quarmtool_install_button"), ("Quarm+", self.update_quarmplus, "quarmplus_install_button"), ("Quarm Patcher", self.install_quarm_patcher, "patcher_button")]),
+        for sn, items in [("Directory Selection", [("Select Zeal Directory", self.select_zeal_dir, "dir_zeal"), ("Select QuarmTool Directory", self.select_quarmtool_dir, "dir_quarmtool"), ("Select PQ Companion", self.select_pqcompanion_dir, "dir_pqcompanion")]),
+                          ("Addons", [("Zeal", self.update_zeal, "zeal_install_button"), ("QuarmTool", self.update_quarmtool, "quarmtool_install_button"), ("PQ Companion", self.install_pqcompanion, "pqcompanion_button"), ("Quarm+", self.update_quarmplus, "quarmplus_install_button"), ("Quarm Patcher", self.install_quarm_patcher, "patcher_button"), ("KaichoFX", self.install_kaichofx, "kaichofx_button")]),
                           ("UI Selection", [("NillipussUI_1080p", lambda: self.install_ui_files_for_update("NillipussUI_1080p")), ("NillipussUI_1440p", lambda: self.install_ui_files_for_update("NillipussUI_1440p"))]),
                           ("Utilities", [("Apply WASD Shortcuts", self.apply_wasd_shortcuts), ("Optimize Settings", self.optimize_settings), ("Advanced Configurator", self.open_advanced_configurator)])]:
             sf = tk.Frame(self.left_frame, bg="black"); sf.pack(fill=tk.X, padx=5, pady=5)
@@ -564,7 +628,13 @@ class ModernLoadingScreen(tk.Tk):
             for it in items:
                 if len(it) == 3:
                     _, cmd, cid = it; ifr = tk.Frame(cf, bg="black"); ifr.pack(fill=tk.X, pady=2)
-                    if cid == "zeal_install_button":
+                    if cid == "dir_zeal":
+                        self.dir_zeal_button = tk.Button(ifr, text="Select Zeal Directory", command=cmd, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE"); self.dir_zeal_button.pack(fill=tk.X)
+                    elif cid == "dir_quarmtool":
+                        self.dir_quarmtool_button = tk.Button(ifr, text="Select QuarmTool Directory", command=cmd, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE"); self.dir_quarmtool_button.pack(fill=tk.X)
+                    elif cid == "dir_pqcompanion":
+                        self.dir_pqcompanion_button = tk.Button(ifr, text="Select PQ Companion", command=cmd, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE"); self.dir_pqcompanion_button.pack(fill=tk.X)
+                    elif cid == "zeal_install_button":
                         zf = tk.Frame(ifr, bg="black"); zf.pack(fill=tk.X)
                         self.zeal_update_button = tk.Button(zf, text="Zeal (?)", command=cmd, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE"); self.zeal_update_button.pack(side=tk.LEFT, fill=tk.X, expand=True)
                         tk.Button(zf, text="\u25BC", command=lambda: self.show_version_dropdown("Zeal", zf), font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE", width=2).pack(side=tk.RIGHT)
@@ -572,10 +642,14 @@ class ModernLoadingScreen(tk.Tk):
                         qf = tk.Frame(ifr, bg="black"); qf.pack(fill=tk.X)
                         self.quarmtool_update_button = tk.Button(qf, text="QuarmTool (?)", command=cmd, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE"); self.quarmtool_update_button.pack(side=tk.LEFT, fill=tk.X, expand=True)
                         tk.Button(qf, text="\u25BC", command=lambda: self.show_version_dropdown("QuarmTool", qf), font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE", width=2).pack(side=tk.RIGHT)
+                    elif cid == "pqcompanion_button":
+                        self.pqcompanion_button = tk.Button(ifr, text="Install PQ Companion", command=cmd, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE"); self.pqcompanion_button.pack(fill=tk.X)
                     elif cid == "quarmplus_install_button":
                         self.quarmplus_update_button = tk.Button(ifr, text=f"Quarm+ ({APP_VERSION})", command=cmd, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE"); self.quarmplus_update_button.pack(fill=tk.X)
                     elif cid == "patcher_button":
                         self.patcher_button = tk.Button(ifr, text="Install Quarm Patcher", command=cmd, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE"); self.patcher_button.pack(fill=tk.X)
+                    elif cid == "kaichofx_button":
+                        self.kaichofx_button = tk.Button(ifr, text="Install KaichoFX", command=cmd, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE"); self.kaichofx_button.pack(fill=tk.X)
                 else:
                     lb, cmd = it; tk.Button(cf, text=lb, command=cmd, font=("Segoe UI", 10), fg="white", bg="#0078D4", activebackground="#106EBE").pack(fill=tk.X, pady=2)
 
@@ -607,13 +681,25 @@ class ModernLoadingScreen(tk.Tk):
             self.zeal_dir.set(d); self.save_settings()
             self.log_message(f"Zeal dir: {d}", "green" if os.path.exists(os.path.join(d, "eqgame.exe")) else "yellow")
             self.version_cache.pop("zeal_versions", None); self.initial_version_check()
-            self.update_zeal_button(); self.update_patcher_button(); self.update_ui_selection()
+            self.update_zeal_button(); self.update_patcher_button(); self.update_kaichofx_button(); self.update_dir_buttons(); self.update_ui_selection()
 
     def select_quarmtool_dir(self):
         d = filedialog.askdirectory(title="Select QuarmTool Directory")
         if d:
             self.quarmtool_dir.set(d); self.save_settings(); self.log_message(f"QuarmTool dir: {d}", "green")
-            self.version_cache.pop("quarmtool_versions", None); self.initial_version_check(); self.update_quarmtool_button()
+            self.version_cache.pop("quarmtool_versions", None); self.initial_version_check(); self.update_quarmtool_button(); self.update_dir_buttons()
+
+    def select_pqcompanion_dir(self):
+        d = filedialog.askdirectory(title="Select PQ Companion Directory")
+        if d:
+            self.pqcompanion_dir.set(d); self.save_settings()
+            if self.is_pqcompanion_installed():
+                self.log_message(f"PQ Companion dir: {d}", "green")
+                self.run_pqcompanion_button.pack(side=tk.LEFT, padx=5)
+            else:
+                self.log_message(f"PQ Companion.exe not found in {d}", "yellow")
+                self.run_pqcompanion_button.pack_forget()
+            self.update_dir_buttons(); self.update_pqcompanion_button()
 
     # -- Run --
     def run_quarmtool(self):
@@ -640,6 +726,14 @@ class ModernLoadingScreen(tk.Tk):
         try: subprocess.Popen(p, cwd=d, creationflags=subprocess.CREATE_NO_WINDOW); self.log_message("Started Patcher", "green")
         except Exception as e: self.log_message(str(e), "red")
 
+    def run_pq_companion(self):
+        d = self.pqcompanion_dir.get()
+        if not d: self.log_message("Set PQ Companion directory.", "red"); return
+        p = os.path.join(d, "PQ Companion.exe")
+        if not os.path.exists(p): self.log_message("PQ Companion.exe not found.", "red"); return
+        try: subprocess.Popen(p, cwd=d); self.log_message("Started PQ Companion", "green")
+        except Exception as e: self.log_message(str(e), "red")
+
     # -- Updates --
     def check_and_install_updates(self):
         self.log_message("Checking for updates..."); self.update_progress(0)
@@ -647,7 +741,7 @@ class ModernLoadingScreen(tk.Tk):
             ups = self._check_all_updates()
             self.log_message(("Update(s): " + ", ".join(ups) + " - Click yellow buttons.") if ups else "All up to date!", "#ADD8E6" if ups else "green")
         except Exception as e: self.log_message(str(e), "red")
-        finally: self.update_progress(100); self.update_zeal_button(); self.update_quarmtool_button(); self.update_quarmplus_button(); self.update_patcher_button(); self.update_ui_selection()
+        finally: self.update_progress(100); self.update_zeal_button(); self.update_quarmtool_button(); self.update_quarmplus_button(); self.update_patcher_button(); self.update_kaichofx_button(); self.update_pqcompanion_button(); self.update_dir_buttons(); self.update_ui_selection()
 
     def update_zeal(self):
         zd = self.zeal_dir.get()
@@ -690,6 +784,85 @@ class ModernLoadingScreen(tk.Tk):
                 os.remove(dp); self.log_message("Patcher installed", "green")
         except Exception as e: self.log_message(str(e), "red")
         finally: self.update_patcher_button(); self.update_progress(100)
+
+    def install_pqcompanion(self):
+        self.clipboard_clear(); self.clipboard_append("https://github.com/jasonsoprovich/pq-companion/releases/latest")
+        self.log_message("PQ Companion URL copied! Download the latest .exe installer and run it.", "green")
+
+    def install_kaichofx(self):
+        zd = self.zeal_dir.get()
+        if not zd: self.log_message("Set Zeal directory.", "red"); return
+        if not os.path.exists(os.path.join(zd, "eqgame.exe")): CustomMessageBox(self, "Error", "Not an EQ directory."); return
+        self.log_message("Checking KaichoFX..."); self.update_progress(0)
+        try:
+            r = requests.get("https://api.github.com/repos/IraLeePNG/KaichoFX_quarm_spellparticles/releases/latest", timeout=10)
+            if r.status_code != 200: self.log_message(f"Fetch failed: {r.status_code}", "red"); return
+            rd = r.json(); lr = rd.get("tag_name", "0.0.0"); ln = self.normalize_version(lr)
+            cn = self.ui_versions.get("KaichoFX", {}).get("normalized", "0.0.0")
+            if self.is_kaichofx_installed() and version.parse(ln) <= version.parse(cn):
+                self.log_message("KaichoFX is up to date.", "green"); self.update_progress(100); return
+            assets = rd.get('assets', [])
+            if not assets: self.log_message("No release assets found.", "red"); return
+            dl_url = None
+            for a in assets:
+                an = a.get('name', '').lower()
+                if an.endswith('.zip') or an.endswith('.7z'): dl_url = a['browser_download_url']; break
+            if not dl_url: dl_url = assets[0]['browser_download_url']
+            ext = ".7z" if dl_url.lower().endswith('.7z') else ".zip"
+            dp = os.path.join(zd, f"kaichofx_download{ext}")
+            self.log_message("Downloading KaichoFX...")
+            if not self.download_with_retry(dl_url, dp): self.log_message("Download failed.", "red"); return
+            # Backup existing SpellEffects folder
+            se_path = os.path.join(zd, "SpellEffects")
+            if os.path.isdir(se_path):
+                ts = datetime.now().strftime("%m%d%y%H%M%S")
+                backup_name = f"SpellEffects-{ts}"
+                backup_path = os.path.join(zd, backup_name)
+                self.log_message(f"Backing up SpellEffects to {backup_name}...")
+                shutil.move(se_path, backup_path)
+            # Create fresh SpellEffects folder
+            os.makedirs(se_path, exist_ok=True)
+            # Extract into SpellEffects
+            self.log_message("Extracting KaichoFX...")
+            tmp = os.path.join(zd, "tmp_kaichofx"); os.makedirs(tmp, exist_ok=True)
+            try:
+                if ext == ".7z":
+                    with py7zr.SevenZipFile(dp, 'r') as z: z.extractall(tmp)
+                else:
+                    with zipfile.ZipFile(dp, 'r') as z: z.extractall(tmp)
+            except Exception as e:
+                self.log_message(f"Extract error: {e}", "red"); shutil.rmtree(tmp, True)
+                if os.path.exists(dp): os.remove(dp)
+                return
+            # Move extracted contents into SpellEffects
+            items = os.listdir(tmp)
+            if len(items) == 1 and os.path.isdir(os.path.join(tmp, items[0])):
+                src = os.path.join(tmp, items[0])
+                for f in os.listdir(src): shutil.move(os.path.join(src, f), os.path.join(se_path, f))
+            else:
+                for f in items: shutil.move(os.path.join(tmp, f), os.path.join(se_path, f))
+            shutil.rmtree(tmp, True)
+            if os.path.exists(dp): os.remove(dp)
+            # Modify eqclient.ini: [Defaults] ShowSpellEffects=1
+            ep = os.path.join(zd, 'eqclient.ini')
+            ec = configparser.ConfigParser(); ec.optionxform = str
+            if os.path.exists(ep): ec.read(ep)
+            if not ec.has_section('Defaults'): ec.add_section('Defaults')
+            ec.set('Defaults', 'ShowSpellEffects', '1')
+            with open(ep, 'w') as f: ec.write(f)
+            # Modify zeal.ini: [SpellEffects] DisableSprites=TRUE, BardEffects=2
+            zp = os.path.join(zd, 'Zeal.ini')
+            zc = configparser.ConfigParser(); zc.optionxform = str
+            if os.path.exists(zp): zc.read(zp)
+            if not zc.has_section('SpellEffects'): zc.add_section('SpellEffects')
+            zc.set('SpellEffects', 'DisableSprites', 'TRUE')
+            zc.set('SpellEffects', 'BardEffects', '2')
+            with open(zp, 'w') as f: zc.write(f)
+            # Track version
+            self.ui_versions["KaichoFX"] = {"raw": lr, "normalized": ln}
+            self.save_settings(); self.log_message(f"KaichoFX installed ({lr})", "green")
+        except Exception as e: self.log_message(f"Error: {e}", "red")
+        finally: self.update_kaichofx_button(); self.update_progress(100)
 
     # -- Built-in UI --
     def install_ui_files_for_update(self, name):
@@ -987,6 +1160,12 @@ class ModernLoadingScreen(tk.Tk):
         d = self.quarmtool_dir.get(); return bool(d) and os.path.exists(os.path.join(d, "QuarmTool.exe"))
     def is_quarm_patcher_installed(self):
         zd = self.zeal_dir.get(); return bool(zd) and os.path.exists(os.path.join(zd, "eqemupatcher.exe"))
+    def is_kaichofx_installed(self):
+        zd = self.zeal_dir.get()
+        if not zd: return False
+        return os.path.isdir(os.path.join(zd, "SpellEffects")) and "KaichoFX" in self.ui_versions
+    def is_pqcompanion_installed(self):
+        d = self.pqcompanion_dir.get(); return bool(d) and os.path.exists(os.path.join(d, "PQ Companion.exe"))
 
     def delete_equi_options_window(self, zd):
         p = os.path.join(zd, "eqclient.ini")
