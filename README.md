@@ -38,11 +38,15 @@ Feel free to share suggestions, and thank you for using Quarm+!
 
 Zeal:
 https://github.com/CoastalRedwood/Zeal
+
 QuarmTool:
 https://github.com/EJWellman/QuarmTool
+
 PQ Companion:
 https://github.com/jasonsoprovich/pq-companion
+
 KaichoFX:
 https://github.com/IraLeePNG/KaichoFX_quarm_spellparticles
+
 Everything else:
 https://quarm.guide/
